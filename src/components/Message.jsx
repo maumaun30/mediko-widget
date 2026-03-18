@@ -6,62 +6,63 @@ function formatTime(ts) {
 }
 
 /**
- * Parse Markdown-style links [text](url) and plain URLs into <a> tags.
- * Everything else is rendered as plain text — no full Markdown parser needed.
+ * Render message content:
+ *   [Label](https://url)  → <a href="url">Label</a>   (product name as hyperlink)
+ *   https://bare.url      → stripped out entirely       (already covered by Markdown format)
+ *   plain text            → rendered as-is with <br> for newlines
+ *
+ * We intentionally hide raw URLs — the AI is instructed to always use
+ * Markdown [label](url) format, so bare URLs only appear as noise.
  */
 function renderContent(text) {
   if (!text) return null
 
-  // Split on [text](url) patterns and bare https:// URLs
-  const parts = text.split(/(\[([^\]]+)\]\((https?:\/\/[^)]+)\)|https?:\/\/\S+)/g)
+  // Single regex: captures [label](url) blocks and bare URLs
+  const TOKEN = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|https?:\/\/[^\s)]+/g
 
   const elements = []
-  let i = 0
+  let lastIndex  = 0
+  let match
+  let key = 0
 
-  while (i < parts.length) {
-    const part = parts[i]
-    if (!part) { i++; continue }
+  while ((match = TOKEN.exec(text)) !== null) {
+    // Push any plain text before this match
+    if (match.index > lastIndex) {
+      pushText(text.slice(lastIndex, match.index), key++, elements)
+    }
 
-    // Full markdown link match: [label](url)
-    const mdMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/)
-    if (mdMatch) {
+    if (match[1]) {
+      // Markdown link [label](url) → hyperlink showing label only
       elements.push(
-        <a key={i} href={mdMatch[2]} target="_blank" rel="noopener noreferrer"
-           style={{ color: 'var(--mdk-accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>
-          {mdMatch[1]}
+        <a key={key++}
+           href={match[2]}
+           target="_blank"
+           rel="noopener noreferrer"
+           style={{ fontWeight: 500, textDecoration: 'underline', color: 'inherit' }}>
+          {match[1]}
         </a>
       )
-      i++
-      continue
     }
+    // Bare URL — silently drop it (it's a duplicate of the Markdown label above)
 
-    // Bare URL
-    const urlMatch = part.match(/^https?:\/\/\S+$/)
-    if (urlMatch) {
-      elements.push(
-        <a key={i} href={part} target="_blank" rel="noopener noreferrer"
-           style={{ color: 'var(--mdk-accent)', textDecoration: 'underline', wordBreak: 'break-all' }}>
-          {part}
-        </a>
-      )
-      i++
-      continue
-    }
+    lastIndex = match.index + match[0].length
+  }
 
-    // Plain text — preserve newlines
-    if (part.includes('\n')) {
-      const lines = part.split('\n')
-      lines.forEach((line, j) => {
-        if (j > 0) elements.push(<br key={`${i}-br-${j}`} />)
-        if (line) elements.push(<span key={`${i}-${j}`}>{line}</span>)
-      })
-    } else if (part) {
-      elements.push(<span key={i}>{part}</span>)
-    }
-    i++
+  // Remaining text after last match
+  if (lastIndex < text.length) {
+    pushText(text.slice(lastIndex), key++, elements)
   }
 
   return elements
+}
+
+function pushText(str, key, elements) {
+  if (!str) return
+  const lines = str.split('\n')
+  lines.forEach((line, j) => {
+    if (j > 0) elements.push(<br key={`${key}-br-${j}`} />)
+    if (line)  elements.push(<span key={`${key}-${j}`}>{line}</span>)
+  })
 }
 
 export function Message({ role, content, ts }) {
