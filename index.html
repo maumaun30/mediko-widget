@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mediko Widget — Dev Preview</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .page-mock {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 600px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.1);
+    }
+    h1 { color: #1A5276; margin-bottom: 12px; }
+    p  { color: #555; line-height: 1.6; }
+    .product-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+    .product-name  { font-weight: 600; color: #1A5276; }
+    .product-price { color: #1ABC9C; font-size: 18px; font-weight: 700; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="page-mock">
+    <h1>Mediko Supplement Store</h1>
+    <p>Premium supplements para sa mas malusog na buhay. The Mediko chat widget appears in the bottom-right corner.</p>
+    <div class="product-card">
+      <div class="product-name">Mediko Vitamin C 1000mg</div>
+      <div class="product-price">₱299.00</div>
+      <p style="margin-top:8px;font-size:14px;color:#666">High-potency Vitamin C for daily immunity support.</p>
+    </div>
+  </div>
+
+  <!-- Widget loads here — same as in Shopify theme.liquid -->
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

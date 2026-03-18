@@ -1,0 +1,69 @@
+<!--
+  ════════════════════════════════════════════════════════════
+  Mediko Chat Widget — Shopify Integration
+  ════════════════════════════════════════════════════════════
+
+  SETUP (one-time):
+  ─────────────────
+  1. Build the widget:
+       cd mediko-widget
+       VITE_API_URL=https://your-api-domain.com npm run build
+     This produces:  mediko-widget/dist/mediko-chat.iife.js
+
+  2. Host the built file. Two options:
+
+     Option A — Serve from your Fastify API (easiest):
+       Copy dist/mediko-chat.iife.js to your Fastify server's
+       public/ folder and serve it as a static file.
+       Add to app.js:
+         import fastifyStatic from '@fastify/static'
+         await fastify.register(fastifyStatic, {
+           root: join(__dirname, 'public'),
+           prefix: '/static/'
+         })
+       URL: https://your-api-domain.com/static/mediko-chat.iife.js
+
+     Option B — Shopify CDN (recommended for production):
+       In Shopify Admin → Content → Files, upload mediko-chat.iife.js
+       Copy the CDN URL Shopify provides.
+
+  3. Paste the <script> tag below into your theme.liquid,
+     just before </body>.
+
+  ════════════════════════════════════════════════════════════
+-->
+
+<!-- Mediko Chat Widget — paste just before </body> in theme.liquid -->
+<script
+  src="https://your-api-domain.com/static/mediko-chat.iife.js"
+  defer
+  crossorigin="anonymous"
+></script>
+
+<!--
+  CUSTOMISATION:
+  ─────────────
+  Override brand colours by adding CSS variables to your theme:
+
+  <style>
+    #mediko-chat-root::part(host) {
+      --mdk-primary:    #YOUR_COLOR;
+      --mdk-accent:     #YOUR_ACCENT;
+    }
+  </style>
+
+  (Note: Shadow DOM parts are only exposed if needed — most stores
+   won't need this as the default Mediko colours are used.)
+
+  ════════════════════════════════════════════════════════════
+  WHAT THE WIDGET DOES:
+  ─────────────────────
+  • Mounts inside a Shadow DOM — zero CSS conflict with your theme
+  • Persists session in localStorage (survives page navigation)
+  • Shows typing indicator while Medi is responding
+  • Quick-reply buttons for common questions
+  • Unread message badge on the FAB when window is closed
+  • Graceful handoff: "Makausap ng agent" → agent mode
+  • Fully responsive — full-screen on mobile
+  ════════════════════════════════════════════════════════════
+-->
