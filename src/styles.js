@@ -273,4 +273,19 @@ export const WIDGET_CSS = `/* mediko-widget.css
   padding: 4px 0 6px;
 }
 .powered-by a { color: var(--mdk-muted); text-decoration: none; }
+
+/* ── Product links inside chat bubbles ── */
+.msg-row.assistant .bubble a {
+  color: var(--mdk-primary);
+  text-decoration: underline;
+  word-break: break-all;
+  font-weight: 500;
+}
+.msg-row.assistant .bubble a:hover {
+  color: var(--mdk-primary-lt);
+}
+.msg-row.user .bubble a {
+  color: rgba(255,255,255,.9);
+  text-decoration: underline;
+}
 `
