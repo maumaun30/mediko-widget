@@ -1,12 +1,12 @@
 /**
- * useChat.js
+ * useChat.js — fixed for Shopify cross-origin SSE streaming
  *
- * Core chat hook. Manages:
- *   - Session lifecycle (create on mount, persist in localStorage)
- *   - Message state
- *   - SSE streaming from POST /api/chat
- *   - Handoff state
- *   - History reload on re-open
+ * Key fixes:
+ *  1. Don't add the assistant message slot until first chunk arrives
+ *     (avoids Shopify's div:empty → display:none killing the bubble)
+ *  2. isTyping stays true until first chunk, not until fetch resolves
+ *  3. Robust SSE line parsing that handles multi-line buffers correctly
+ *  4. Explicit credentials: 'omit' and mode: 'cors' for cross-origin fetch
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
@@ -14,49 +14,53 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 const API_URL = import.meta.env.VITE_API_URL
 
 export function useChat() {
-  const [messages,    setMessages]    = useState([])
-  const [isTyping,    setIsTyping]    = useState(false)
-  const [sessionId,   setSessionId]   = useState(null)
-  const [mode,        setMode]        = useState('ai')   // 'ai' | 'agent' | 'handoff'
-  const [error,       setError]       = useState(null)
-  const abortRef = useRef(null)
+  const [messages,  setMessages]  = useState([])
+  const [isTyping,  setIsTyping]  = useState(false)
+  const [sessionId, setSessionId] = useState(null)
+  const [mode,      setMode]      = useState('ai')
+  const [error,     setError]     = useState(null)
+  const abortRef    = useRef(null)
+  const sessionRef  = useRef(null)   // mirror sessionId for callbacks
 
-  // ── Session init ───────────────────────────────────────────
+  useEffect(() => { initSession() }, [])
 
-  useEffect(() => {
-    initSession()
-  }, [])
+  // ── Session init ─────────────────────────────────────────
 
   async function initSession() {
-    // Re-use existing session from localStorage if available
     const stored = localStorage.getItem('mediko_session_id')
     if (stored) {
+      sessionRef.current = stored
       setSessionId(stored)
       await loadHistory(stored)
       return
     }
-
     try {
-      const res  = await fetch(`${API_URL}/api/chat/session`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ metadata: { url: location.href } })
+      const res = await fetch(`${API_URL}/api/chat/session`, {
+        method:      'POST',
+        headers:     { 'Content-Type': 'application/json' },
+        credentials: 'omit',
+        mode:        'cors',
+        body:        JSON.stringify({ metadata: { url: location.href } })
       })
       const { sessionId: id } = await res.json()
       localStorage.setItem('mediko_session_id', id)
+      sessionRef.current = id
       setSessionId(id)
       addMessage('assistant', 'Kumusta po! Ako si Medi, ang inyong Mediko assistant. Paano ko kayo matutulungan ngayon? 😊')
-    } catch {
-      setError('Hindi makakonekta sa server. Subukan ulit po.')
+    } catch (e) {
+      setError('Hindi makakonekta sa server. I-refresh po ang page.')
     }
   }
 
   async function loadHistory(sid) {
     try {
-      const res  = await fetch(`${API_URL}/api/chat/history/${sid}`)
+      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, {
+        credentials: 'omit',
+        mode:        'cors'
+      })
       if (!res.ok) {
-        // Session expired or not found — create new one
         localStorage.removeItem('mediko_session_id')
+        sessionRef.current = null
         initSession()
         return
       }
@@ -76,109 +80,142 @@ export function useChat() {
     }
   }
 
-  // ── Send message ───────────────────────────────────────────
+  // ── Send message ─────────────────────────────────────────
 
   const sendMessage = useCallback(async (text) => {
-    if (!text.trim() || !sessionId || isTyping) return
+    const sid = sessionRef.current
+    if (!text.trim() || !sid || isTyping) return
 
     setError(null)
     addMessage('user', text)
     setIsTyping(true)
 
-    // Cancel any in-progress stream
     abortRef.current?.abort()
     abortRef.current = new AbortController()
 
+    // assistantId is created here but the message slot is added only
+    // when the first chunk arrives — prevents Shopify hiding an empty div
+    const assistantId   = `msg-${Date.now()}`
+    let   slotAdded     = false
+    let   fullContent   = ''
+
+    function ensureSlot() {
+      if (!slotAdded) {
+        slotAdded = true
+        setIsTyping(false)
+        setMessages(prev => [
+          ...prev,
+          { id: assistantId, role: 'assistant', content: '', ts: new Date().toISOString() }
+        ])
+      }
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/chat`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ message: text, sessionId }),
-        signal:  abortRef.current.signal
+        method:      'POST',
+        headers:     { 'Content-Type': 'application/json' },
+        credentials: 'omit',
+        mode:        'cors',
+        body:        JSON.stringify({ message: text, sessionId: sid }),
+        signal:      abortRef.current.signal
       })
 
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.body) throw new Error('ReadableStream not supported')
 
-      // Stream SSE
       const reader  = res.body.getReader()
       const decoder = new TextDecoder()
-      let assistantId = `msg-${Date.now()}`
-      let buffer = ''
-
-      // Add empty assistant message slot for streaming into
-      setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', ts: new Date().toISOString() }])
-      setIsTyping(false)
+      let   buffer  = ''
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+
+        if (done) {
+          // Process any remaining buffer content on stream close
+          if (buffer.trim()) processLine(buffer.trim())
+          break
+        }
 
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop()  // keep incomplete line
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const evt = JSON.parse(line.slice(6))
-            handleSseEvent(evt, assistantId)
-          } catch {}
+        // Split on double-newline (SSE event delimiter)
+        const events = buffer.split(/\n\n/)
+        buffer = events.pop()  // last element may be incomplete
+
+        for (const event of events) {
+          // Each event may have multiple lines; find the data: line
+          for (const line of event.split('\n')) {
+            processLine(line)
+          }
         }
       }
 
     } catch (err) {
       if (err.name === 'AbortError') return
+      console.error('[Mediko widget] Stream error:', err)
       setIsTyping(false)
+      // Remove empty slot if it was added but no content came through
+      if (slotAdded && !fullContent) {
+        setMessages(prev => prev.filter(m => m.id !== assistantId))
+      }
       setError('May nangyaring mali. Subukan ulit po.')
     }
-  }, [sessionId, isTyping])
 
-  // ── SSE event handler ──────────────────────────────────────
+    // ── SSE line processor ──────────────────────────────────
 
-  function handleSseEvent(evt, assistantId) {
-    switch (evt.type) {
+    function processLine(line) {
+      if (!line.startsWith('data: ')) return
+      let evt
+      try { evt = JSON.parse(line.slice(6)) } catch { return }
 
-      case 'chunk':
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId
-            ? { ...m, content: m.content + evt.text }
-            : m
-        ))
-        break
+      switch (evt.type) {
 
-      case 'done':
-        setIsTyping(false)
-        break
+        case 'chunk':
+          ensureSlot()
+          fullContent += evt.text
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId
+              ? { ...m, content: m.content + evt.text }
+              : m
+          ))
+          break
 
-      case 'handoff':
-        setMode('handoff')
-        setIsTyping(false)
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId
-            ? { ...m, content: evt.message }
-            : m
-        ))
-        break
+        case 'done':
+          ensureSlot()   // in case model returned empty string
+          setIsTyping(false)
+          break
 
-      case 'agent_mode':
-        setMode('agent')
-        setIsTyping(false)
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId
-            ? { ...m, content: evt.message }
-            : m
-        ))
-        break
+        case 'handoff':
+          ensureSlot()
+          setMode('handoff')
+          setIsTyping(false)
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: evt.message } : m
+          ))
+          break
 
-      case 'error':
-        setIsTyping(false)
-        setError(evt.message)
-        setMessages(prev => prev.filter(m => m.id !== assistantId))
-        break
+        case 'agent_mode':
+          ensureSlot()
+          setMode('agent')
+          setIsTyping(false)
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: evt.message } : m
+          ))
+          break
+
+        case 'error':
+          setIsTyping(false)
+          if (slotAdded) {
+            setMessages(prev => prev.filter(m => m.id !== assistantId))
+          }
+          setError(evt.message)
+          break
+      }
     }
-  }
 
-  // ── Helpers ────────────────────────────────────────────────
+  }, [isTyping])
+
+  // ── Helpers ───────────────────────────────────────────────
 
   function addMessage(role, content) {
     setMessages(prev => [...prev, {
@@ -191,6 +228,8 @@ export function useChat() {
 
   function resetSession() {
     localStorage.removeItem('mediko_session_id')
+    sessionRef.current = null
+    abortRef.current?.abort()
     setMessages([])
     setMode('ai')
     setError(null)

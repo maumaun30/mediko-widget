@@ -1,4 +1,5 @@
-/* mediko-widget.css
+// Widget styles as a plain JS string — reliable in Vite IIFE library mode.
+export const WIDGET_CSS = `/* mediko-widget.css
    Scoped inside Shadow DOM — zero risk of conflicting with Shopify theme styles.
    Uses CSS custom properties so the host page can override brand colours if needed.
 */
@@ -272,3 +273,4 @@
   padding: 4px 0 6px;
 }
 .powered-by a { color: var(--mdk-muted); text-decoration: none; }
+`

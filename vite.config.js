@@ -4,13 +4,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Inject API URL at build time — override with VITE_API_URL env var
+    'process.env.NODE_ENV':       JSON.stringify('production'),
     'import.meta.env.VITE_API_URL': JSON.stringify(
-      process.env.VITE_API_URL || 'http://localhost:3001'
+      process.env.VITE_API_URL || 'https://mediko-chatbot-production.up.railway.app'
     )
   },
   build: {
-    // Single IIFE file — no code splitting, no dynamic imports
     lib: {
       entry:    'src/main.jsx',
       name:     'MedikoChat',
@@ -18,17 +17,15 @@ export default defineConfig({
       formats:  ['iife']
     },
     rollupOptions: {
-      // Bundle React inside the IIFE — Shopify themes don't have React globally
       external: [],
       output: {
-        // Inline all CSS into the JS bundle via injectedStyles in main.jsx
+        // CSS is handled as a JS string in styles.js — no separate asset needed
         assetFileNames: '[name][extname]'
       }
     },
-    // Single output file in dist/
-    outDir:       'dist',
-    emptyOutDir:  true,
-    // Inline CSS as a JS string so we have one file to deploy
-    cssCodeSplit: false
+    outDir:                  'dist',
+    emptyOutDir:             true,
+    cssCodeSplit:            false,
+    chunkSizeWarningLimit:   600
   }
 })
