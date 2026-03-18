@@ -4,8 +4,6 @@ export const WIDGET_CSS = `/* ════════════════�
    Primary: #187adc  Secondary: #ffb73a  Font: Poppins
    ═══════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
-
 :host {
   --mdk-primary:      #187adc;
   --mdk-primary-dk:   #115fa8;
@@ -24,11 +22,14 @@ export const WIDGET_CSS = `/* ════════════════�
   --mdk-bot-text:     #1a2e4a;
   --mdk-radius:       20px;
   --mdk-shadow:       0 12px 48px rgba(24,122,220,.22), 0 2px 8px rgba(0,0,0,.08);
-  --mdk-shadow-fab:   0 6px 24px rgba(24,122,220,.40);
+  --mdk-shadow-fab:   0 6px 24px rgba(255,183,58,.55);
   font-family: 'Poppins', -apple-system, sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Force Poppins on every element — Shadow DOM doesn't inherit from :host automatically */
+* { font-family: 'Poppins', -apple-system, sans-serif; }
 
 /* ══ Tooltip popup ════════════════════════════════════ */
 
@@ -89,10 +90,10 @@ export const WIDGET_CSS = `/* ════════════════�
   width: 66px;
   height: 66px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #187adc 0%, #1563b8 100%);
-  border: 3px solid rgba(255,255,255,.35);
+  background: linear-gradient(135deg, #ffb73a 40%, #ffd815 100%);
+  border: 3px solid rgba(255,255,255,.45);
   cursor: pointer;
-  box-shadow: var(--mdk-shadow-fab);
+  box-shadow: 0 6px 24px rgba(255,183,58,.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -100,9 +101,9 @@ export const WIDGET_CSS = `/* ════════════════�
   position: relative;
   outline: none;
 }
-.fab:hover  { transform: scale(1.1); box-shadow: 0 8px 32px rgba(24,122,220,.55); }
+.fab:hover  { transform: scale(1.1); box-shadow: 0 8px 32px rgba(255,183,58,.65); }
 .fab:active { transform: scale(.96); }
-.fab svg    { width: 30px; height: 30px; fill: #fff; transition: transform .3s; }
+.fab svg    { width: 30px; height: 30px; fill: #1a2e4a; transition: transform .3s; }
 .fab.open svg { transform: rotate(90deg); }
 
 /* Pulse ring */
@@ -110,7 +111,7 @@ export const WIDGET_CSS = `/* ════════════════�
   position: absolute;
   inset: -6px;
   border-radius: 50%;
-  background: rgba(24,122,220,.25);
+  background: rgba(255,183,58,.35);
   animation: pulse 2.2s ease-out infinite;
 }
 .fab-pulse:nth-child(2) { animation-delay: .7s; }
