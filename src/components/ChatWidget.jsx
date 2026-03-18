@@ -4,36 +4,77 @@ import { Message, TypingIndicator } from './Message.jsx'
 
 const QUICK_REPLIES = [
   'Ano ang mga produkto ninyo?',
-  'Para sa immunity',
-  'Saan ang order ko?',
-  'Makausap ng agent'
+  'Para sa kasukasuan at joints',
+  'Para sa immune system',
+  'Saan na ang aking order?',
 ]
 
-// SVG icons
+// ── Icons ────────────────────────────────────────────────────
+
 const ChatIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+  <svg viewBox="0 0 24 24">
+    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+  </svg>
 )
 const CloseIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+  <svg viewBox="0 0 24 24">
+    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+  </svg>
 )
 const SendIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+  <svg viewBox="0 0 24 24">
+    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+  </svg>
 )
 const ResetIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+  <svg viewBox="0 0 24 24">
+    <path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+  </svg>
 )
 
+// ── Tooltip popup ─────────────────────────────────────────────
+
+function TooltipPopup({ onDismiss }) {
+  const [hiding, setHiding] = useState(false)
+
+  function dismiss() {
+    setHiding(true)
+    setTimeout(onDismiss, 320)
+  }
+
+  // Auto-dismiss after 6 seconds
+  useEffect(() => {
+    const t = setTimeout(dismiss, 6000)
+    return () => clearTimeout(t)
+  }, [])
+
+  return (
+    <div className={`tooltip-popup${hiding ? ' hide' : ''}`} onClick={dismiss}>
+      Kamusta po! May katanungan ba kayo? Tara, usap tayo! 😊
+    </div>
+  )
+}
+
+// ── Main widget ───────────────────────────────────────────────
+
 export function ChatWidget() {
-  const [open,     setOpen]     = useState(false)
-  const [input,    setInput]    = useState('')
-  const [unread,   setUnread]   = useState(0)
-  const messagesEndRef           = useRef(null)
-  const inputRef                 = useRef(null)
-  const prevMsgCount             = useRef(0)
+  const [open,         setOpen]         = useState(false)
+  const [input,        setInput]        = useState('')
+  const [unread,       setUnread]       = useState(0)
+  const [showTooltip,  setShowTooltip]  = useState(false)
+  const messagesEndRef                   = useRef(null)
+  const inputRef                         = useRef(null)
+  const prevMsgCount                     = useRef(0)
 
   const { messages, isTyping, mode, error, sendMessage, resetSession } = useChat()
 
-  // Auto-scroll to bottom when messages arrive
+  // Show tooltip after 2.5s on page load — not immediately so it feels natural
+  useEffect(() => {
+    const t = setTimeout(() => setShowTooltip(true), 2500)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     if (!open && messages.length > prevMsgCount.current) {
@@ -42,11 +83,12 @@ export function ChatWidget() {
     prevMsgCount.current = messages.length
   }, [messages, isTyping])
 
-  // Clear unread badge when opened
+  // Focus input on open, clear unread
   useEffect(() => {
     if (open) {
       setUnread(0)
-      setTimeout(() => inputRef.current?.focus(), 150)
+      setShowTooltip(false)
+      setTimeout(() => inputRef.current?.focus(), 200)
     }
   }, [open])
 
@@ -54,7 +96,7 @@ export function ChatWidget() {
     const text = input.trim()
     if (!text || isTyping) return
     setInput('')
-    inputRef.current.style.height = ''
+    if (inputRef.current) inputRef.current.style.height = ''
     sendMessage(text)
   }
 
@@ -65,49 +107,59 @@ export function ChatWidget() {
     }
   }
 
-  function handleQuickReply(text) {
-    sendMessage(text)
-    setOpen(true)
-  }
-
   function autoResize(e) {
     e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 110) + 'px'
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+  }
+
+  function handleQuickReply(text) {
+    setOpen(true)
+    setTimeout(() => sendMessage(text), 100)
   }
 
   const statusText = mode === 'agent'
-    ? 'Naka-konekta sa agent'
+    ? '● Naka-konekta sa ahente'
     : mode === 'handoff'
-    ? 'Naghihintay ng agent...'
-    : 'Online · Karaniwang sumasagot agad'
+    ? '● Naghihintay ng ahente...'
+    : '● Online — handang tumulong'
+
+  const showQuickReplies = messages.length <= 1 && mode === 'ai'
 
   return (
     <>
+      {/* ── Tooltip ── */}
+      {showTooltip && !open && (
+        <TooltipPopup onDismiss={() => setShowTooltip(false)} />
+      )}
+
       {/* ── Chat window ── */}
       {open && (
         <div className="chat-window" role="dialog" aria-label="Mediko Chat">
 
           {/* Header */}
           <div className="chat-header">
-            <div className="avatar">🌿</div>
+            <div className="avatar-wrap">
+              <div className="avatar">🌿</div>
+              <div className="avatar-online" />
+            </div>
             <div className="header-text">
               <div className="header-name">Medi — Mediko Assistant</div>
-              <div className="header-status">{statusText}</div>
+              <div className="header-tagline">{statusText}</div>
             </div>
-            <div className="header-actions">
-              <button className="icon-btn" onClick={resetSession} title="Bagong usapan">
+            <div className="header-btns">
+              <button className="icon-btn" onClick={resetSession} title="Bagong usapan" aria-label="Bagong usapan">
                 <ResetIcon />
               </button>
-              <button className="icon-btn" onClick={() => setOpen(false)} title="Isara">
+              <button className="icon-btn" onClick={() => setOpen(false)} title="Isara" aria-label="Isara">
                 <CloseIcon />
               </button>
             </div>
           </div>
 
-          {/* Mode banner */}
+          {/* Mode banners */}
           {mode === 'handoff' && (
-            <div className="mode-banner">
-              ⏳ Naghihintay ng available na agent. Sandali lang po.
+            <div className="mode-banner handoff">
+              ⏳ Sandali lang po — ikinokonekta kayo sa aming team.
             </div>
           )}
           {mode === 'agent' && (
@@ -118,22 +170,28 @@ export function ChatWidget() {
 
           {/* Messages */}
           <div className="messages">
-            {messages.map(m => (
-              <Message key={m.id} role={m.role} content={m.content} ts={m.ts} />
+            {messages.map((m, idx) => (
+              <Message
+                key={m.id}
+                role={m.role}
+                content={m.content}
+                ts={m.ts}
+                showLabel={m.role === 'assistant' && (idx === 0 || messages[idx-1]?.role !== 'assistant')}
+              />
             ))}
             {isTyping && <TypingIndicator />}
             {error && (
               <div className="msg-row assistant">
-                <div className="bubble" style={{ color: '#c53030', background: '#fff5f5' }}>
-                  {error}
+                <div className="bubble" style={{ background: '#fff0f0', borderColor: '#fecaca', color: '#991b1b' }}>
+                  ⚠️ {error}
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick replies — only show when no messages yet or last is from assistant */}
-          {messages.length <= 1 && mode === 'ai' && (
+          {/* Quick replies */}
+          {showQuickReplies && (
             <div className="quick-replies">
               {QUICK_REPLIES.map(q => (
                 <button key={q} className="quick-reply" onClick={() => handleQuickReply(q)}>
@@ -151,38 +209,42 @@ export function ChatWidget() {
               value={input}
               onChange={e => { setInput(e.target.value); autoResize(e) }}
               onKeyDown={handleKey}
-              placeholder={mode === 'agent' ? 'Mag-type ng mensahe...' : 'Mag-tanong kay Medi...'}
+              placeholder="I-type ang inyong tanong dito..."
               rows={1}
               disabled={isTyping}
-              aria-label="Message input"
+              aria-label="I-type ang mensahe"
             />
             <button
               className="send-btn"
               onClick={handleSend}
               disabled={!input.trim() || isTyping}
-              aria-label="Send"
+              aria-label="Ipadala"
             >
               <SendIcon />
             </button>
           </div>
 
-          <div className="powered-by">
-            Powered by <a href="https://store.mediko.ph" target="_blank" rel="noopener">Mediko</a>
+          <div className="chat-footer">
+            Powered by <a href="https://store.mediko.ph" target="_blank" rel="noopener">Mediko.ph</a>
           </div>
+
         </div>
       )}
 
       {/* ── FAB ── */}
-      <button
-        className="fab"
-        onClick={() => setOpen(o => !o)}
-        aria-label={open ? 'Isara ang chat' : 'Buksan ang chat'}
-      >
-        {open ? <CloseIcon /> : <ChatIcon />}
+      <div className="fab-wrap">
+        <button
+          className={`fab${open ? ' open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+          aria-label={open ? 'Isara ang chat' : 'Buksan ang chat'}
+        >
+          {!open && <><div className="fab-pulse" /><div className="fab-pulse" /></>}
+          {open ? <CloseIcon /> : <ChatIcon />}
+        </button>
         {!open && unread > 0 && (
-          <span className="fab-badge">{unread > 9 ? '9+' : unread}</span>
+          <div className="fab-badge">{unread > 9 ? '9+' : unread}</div>
         )}
-      </button>
+      </div>
     </>
   )
 }

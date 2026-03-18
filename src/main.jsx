@@ -29,6 +29,12 @@ function mount() {
 
   const shadow = host.attachShadow({ mode: 'open' })
 
+  // Load Poppins inside the Shadow DOM
+  const fontLink = document.createElement('link')
+  fontLink.rel  = 'stylesheet'
+  fontLink.href = 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap'
+  shadow.appendChild(fontLink)
+
   const style = document.createElement('style')
   style.textContent = WIDGET_CSS
   shadow.appendChild(style)
