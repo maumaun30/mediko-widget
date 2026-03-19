@@ -22,6 +22,7 @@ export function useChat() {
 
   const sessionRef  = useRef(null)   // mirrors sessionId for use inside callbacks
   const abortRef    = useRef(null)
+  const listenRef   = useRef(null)  // SSE connection for agent messages
   const initialised = useRef(false)  // prevents double-init in StrictMode
 
   useEffect(() => {
@@ -81,6 +82,21 @@ export function useChat() {
       } else {
         addMessage('assistant', GREETING)
       }
+
+      // Check if session is in agent mode — if so open the listen stream
+      try {
+        const modeRes = await fetch(`${API_URL}/api/chat/mode/${stored}`, {
+          credentials: 'omit', mode: 'cors'
+        })
+        if (modeRes.ok) {
+          const { mode: currentMode } = await modeRes.json()
+          if (currentMode === 'agent' || currentMode === 'handoff') {
+            setMode(currentMode)
+            openListenStream(stored)
+          }
+        }
+      } catch { /* non-critical */ }
+
     } catch {
       addMessage('assistant', GREETING)
     }
@@ -211,6 +227,8 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
+          // Open listener so agent replies appear in real time
+          if (sid) openListenStream(sid)
           break
         case 'agent_mode':
           ensureSlot()
@@ -219,6 +237,7 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
+          if (sid) openListenStream(sid)
           break
         case 'error':
           setIsTyping(false)
@@ -232,15 +251,58 @@ export function useChat() {
 
   // ── Reset ────────────────────────────────────────────────
 
+  // ── Agent message listener ──────────────────────────────
+
+  /**
+   * Open a long-lived SSE connection to /api/chat/listen/:sessionId
+   * so agent messages are pushed to the widget in real time.
+   * Called automatically when mode switches to 'agent' or 'handoff'.
+   */
+  function openListenStream(sid) {
+    if (listenRef.current) return  // already open
+    const url = `${API_URL}/api/chat/listen/${sid}`
+    const es  = new EventSource(url, { withCredentials: false })
+
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data)
+        if (evt.type === 'ping') return
+
+        if (evt.type === 'agent_message') {
+          // Add the agent reply as an assistant bubble
+          addMessage('assistant', evt.text)
+        }
+
+        if (evt.type === 'mode_changed' && evt.mode === 'ai') {
+          // Agent returned control to AI — close listen stream, reset mode
+          setMode('ai')
+          addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
+          closeListenStream()
+        }
+      } catch {}
+    }
+
+    es.onerror = () => {
+      // Connection lost — retry is handled by EventSource automatically
+    }
+
+    listenRef.current = es
+  }
+
+  function closeListenStream() {
+    listenRef.current?.close()
+    listenRef.current = null
+  }
+
   function resetSession() {
     localStorage.removeItem(STORAGE_KEY)
     sessionRef.current = null
     abortRef.current?.abort()
+    closeListenStream()
     setMessages([])
     setMode('ai')
     setError(null)
     setSessionId(null)
-    // Show greeting again without creating a session
     setTimeout(() => addMessage('assistant', GREETING), 50)
   }
 
