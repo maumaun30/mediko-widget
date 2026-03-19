@@ -14,7 +14,6 @@ export function useChat() {
   const [mode,          setMode]          = useState('ai')
   const [error,         setError]         = useState(null)
   const [quickReplies,  setQuickReplies]  = useState([])
-  const [businessHours, setBusinessHours] = useState(null)
 
   const sessionRef  = useRef(null)
   const abortRef    = useRef(null)
@@ -33,7 +32,6 @@ export function useChat() {
     if (initialised.current) return
     initialised.current = true
     fetchQuickReplies()
-    fetchBusinessHours()
     restoreSession()
   }, [])
 
@@ -45,17 +43,6 @@ export function useChat() {
       if (!res.ok) return
       const { quickReplies } = await res.json()
       setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
-    } catch {}
-  }
-
-  // ── Business hours ────────────────────────────────────────
-
-  async function fetchBusinessHours() {
-    try {
-      const res = await fetch(`${API_URL}/api/settings/business-hours`, { credentials: 'omit', mode: 'cors' })
-      if (!res.ok) return
-      const data = await res.json()
-      setBusinessHours(data)
     } catch {}
   }
 
@@ -280,7 +267,7 @@ export function useChat() {
 
   return {
     messages, isTyping, agentTyping, mode, error,
-    sessionId, quickReplies, businessHours,
+    sessionId, quickReplies,
     sendMessage, resetSession, rateMessage
   }
 }
