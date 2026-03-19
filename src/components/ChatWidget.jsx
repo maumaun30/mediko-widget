@@ -147,7 +147,7 @@ export function ChatWidget() {
               onKeyDown={handleKey}
               placeholder={mode === 'agent' ? 'Mag-type ng mensahe...' : 'I-type ang inyong tanong dito...'}
               rows={1}
-              disabled={!input.trim() || isTyping}
+              disabled={isTyping}
               aria-label="Message input"
             />
             <button className="send-btn" onClick={handleSend} disabled={!input.trim() || isTyping} aria-label="Ipadala">
