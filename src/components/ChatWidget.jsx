@@ -43,7 +43,7 @@ function TooltipPopup({ onDismiss }) {
 
   return (
     <div className={`tooltip-popup${hiding ? ' hide' : ''}`} onClick={dismiss}>
-      Kamusta po! May katanungan ba kayo? Tara, usap tayo! 😊
+      Kumusta po! Paano ko kayo matutulungan ngayon? 😊
     </div>
   )
 }
