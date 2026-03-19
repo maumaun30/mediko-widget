@@ -1,15 +1,7 @@
-/**
- * useChat.js
- *
- * Session is created LAZILY — only when the customer sends their first message.
- * Page visits never hit the API. Returning visitors with a stored session
- * still load their history normally.
- */
-
 import { useState, useCallback, useRef, useEffect } from 'react'
 
-const API_URL  = import.meta.env.VITE_API_URL
-const GREETING = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
+const API_URL     = import.meta.env.VITE_API_URL
+const GREETING    = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY = 'mediko_session_id'
 
 export function useChat() {
@@ -20,10 +12,18 @@ export function useChat() {
   const [error,        setError]        = useState(null)
   const [quickReplies, setQuickReplies] = useState([])
 
-  const sessionRef  = useRef(null)   // mirrors sessionId for use inside callbacks
-  const abortRef    = useRef(null)
-  const listenRef   = useRef(null)  // SSE connection for agent messages
-  const initialised = useRef(false)  // prevents double-init in StrictMode
+  // Stable refs — never stale inside async callbacks
+  const sessionRef    = useRef(null)
+  const abortRef      = useRef(null)   // aborts the chat SSE stream
+  const listenRef     = useRef(null)   // aborts the agent listen stream
+  const initialised   = useRef(false)
+  const setMessagesRef = useRef(setMessages)
+  const setModeRef     = useRef(setMode)
+  const setIsTypingRef = useRef(setIsTyping)
+  const setErrorRef    = useRef(setError)
+
+  // Keep refs in sync with latest setters (always stable in React)
+  useEffect(() => { setMessagesRef.current = setMessages }, [])
 
   useEffect(() => {
     if (initialised.current) return
@@ -32,37 +32,42 @@ export function useChat() {
     restoreSession()
   }, [])
 
-  // ── Quick replies (public, no auth) ─────────────────────
+  // ── Stable addMessage (uses ref, never stale) ────────────
+
+  const addMessage = useCallback((role, content) => {
+    setMessages(prev => [...prev, {
+      id:      `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      role,
+      content,
+      ts:      new Date().toISOString()
+    }])
+  }, [])
+
+  // ── Quick replies ────────────────────────────────────────
 
   async function fetchQuickReplies() {
     try {
-      const res = await fetch(`${API_URL}/api/quick-replies`, {
-        credentials: 'omit', mode: 'cors'
-      })
+      const res = await fetch(`${API_URL}/api/quick-replies`, { credentials: 'omit', mode: 'cors' })
       if (!res.ok) return
       const { quickReplies } = await res.json()
       setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
-    } catch { /* graceful degradation — widget still works without quick replies */ }
+    } catch {}
   }
 
-  // ── Session restore (returning visitors only) ────────────
+  // ── Session restore ──────────────────────────────────────
 
   async function restoreSession() {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) {
-      // New visitor — show greeting locally, no API call yet
       addMessage('assistant', GREETING)
       return
     }
 
-    // Returning visitor — verify session still exists and load history
     try {
       const res = await fetch(`${API_URL}/api/chat/history/${stored}`, {
         credentials: 'omit', mode: 'cors'
       })
-
       if (!res.ok) {
-        // Session expired or not found — treat as new visitor
         localStorage.removeItem(STORAGE_KEY)
         addMessage('assistant', GREETING)
         return
@@ -74,16 +79,13 @@ export function useChat() {
 
       if (history.length) {
         setMessages(history.map(m => ({
-          id:      m.id,
-          role:    m.role,
-          content: m.content,
-          ts:      m.created_at
+          id: m.id, role: m.role, content: m.content, ts: m.created_at
         })))
       } else {
         addMessage('assistant', GREETING)
       }
 
-      // Check if session is in agent mode — if so open the listen stream
+      // Check mode — if already in agent mode, open listen stream
       try {
         const modeRes = await fetch(`${API_URL}/api/chat/mode/${stored}`, {
           credentials: 'omit', mode: 'cors'
@@ -95,7 +97,7 @@ export function useChat() {
             openListenStream(stored)
           }
         }
-      } catch { /* non-critical */ }
+      } catch {}
 
     } catch {
       addMessage('assistant', GREETING)
@@ -104,18 +106,12 @@ export function useChat() {
 
   // ── Lazy session creation ────────────────────────────────
 
-  /**
-   * Create a session on the first message send.
-   * Returns the new sessionId, or null on failure.
-   */
   async function createSession() {
     try {
       const res = await fetch(`${API_URL}/api/chat/session`, {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'omit',
-        mode:        'cors',
-        body:        JSON.stringify({ metadata: { url: location.href } })
+        method: 'POST', credentials: 'omit', mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metadata: { url: location.href } })
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const { sessionId: id } = await res.json()
@@ -129,6 +125,75 @@ export function useChat() {
     }
   }
 
+  // ── Agent listen stream ──────────────────────────────────
+  // Defined as a stable function using refs — never stale in closures
+
+  function openListenStream(sid) {
+    if (listenRef.current) return  // already open
+
+    const controller = new AbortController()
+    listenRef.current = controller
+
+    // Capture stable callbacks via closure over the useCallback versions
+    const _addMessage = addMessage
+
+    ;(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/chat/listen/${sid}`, {
+          method: 'GET', credentials: 'omit', mode: 'cors',
+          signal: controller.signal
+        })
+
+        if (!res.ok || !res.body) {
+          console.error('[Mediko] Listen stream failed:', res.status)
+          return
+        }
+
+        const reader  = res.body.getReader()
+        const decoder = new TextDecoder()
+        let   buffer  = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const events = buffer.split(/\n\n/)
+          buffer = events.pop()
+
+          for (const event of events) {
+            for (const line of event.split('\n')) {
+              if (!line.startsWith('data: ')) continue
+              try {
+                const evt = JSON.parse(line.slice(6))
+                if (evt.type === 'ping' || evt.type === 'connected') continue
+
+                if (evt.type === 'agent_message') {
+                  _addMessage('assistant', evt.text)
+                }
+
+                if (evt.type === 'mode_changed' && evt.mode === 'ai') {
+                  setMode('ai')
+                  _addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
+                  closeListenStream()
+                  return
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return
+        console.error('[Mediko] Listen stream error:', err)
+      }
+    })()
+  }
+
+  function closeListenStream() {
+    listenRef.current?.abort()
+    listenRef.current = null
+  }
+
   // ── Send message ─────────────────────────────────────────
 
   const sendMessage = useCallback(async (text) => {
@@ -138,7 +203,7 @@ export function useChat() {
     addMessage('user', text)
     setIsTyping(true)
 
-    // Create session lazily on first ever message
+    // Lazy session creation on first message
     let sid = sessionRef.current
     if (!sid) {
       sid = await createSession()
@@ -164,12 +229,10 @@ export function useChat() {
 
     try {
       const res = await fetch(`${API_URL}/api/chat`, {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'omit',
-        mode:        'cors',
-        body:        JSON.stringify({ message: text, sessionId: sid }),
-        signal:      abortRef.current.signal
+        method: 'POST', credentials: 'omit', mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body:   JSON.stringify({ message: text, sessionId: sid }),
+        signal: abortRef.current.signal
       })
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -195,7 +258,6 @@ export function useChat() {
 
     } catch (err) {
       if (err.name === 'AbortError') return
-      console.error('[Mediko widget] Stream error:', err)
       setIsTyping(false)
       if (slotAdded && !fullContent) {
         setMessages(prev => prev.filter(m => m.id !== assistantId))
@@ -227,8 +289,7 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
-          // Open listener so agent replies appear in real time
-          if (sid) openListenStream(sid)
+          openListenStream(sid)
           break
         case 'agent_mode':
           ensureSlot()
@@ -237,7 +298,7 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
-          if (sid) openListenStream(sid)
+          openListenStream(sid)
           break
         case 'error':
           setIsTyping(false)
@@ -247,81 +308,10 @@ export function useChat() {
       }
     }
 
-  }, [isTyping])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTyping, addMessage])
 
   // ── Reset ────────────────────────────────────────────────
-
-  // ── Agent message listener ──────────────────────────────
-
-  /**
-   * Open a long-lived SSE connection to /api/chat/listen/:sessionId
-   * so agent messages are pushed to the widget in real time.
-   * Called automatically when mode switches to 'agent' or 'handoff'.
-   */
-  function openListenStream(sid) {
-    if (listenRef.current) return  // already open
-
-    // Use fetch + ReadableStream instead of EventSource so CORS works
-    // identically to the /api/chat endpoint (EventSource can't set headers
-    // and browser CORS rules differ between GET and EventSource)
-    const controller = new AbortController()
-    listenRef.current = controller
-
-    ;(async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/chat/listen/${sid}`, {
-          method:      'GET',
-          credentials: 'omit',
-          mode:        'cors',
-          signal:      controller.signal
-        })
-
-        if (!res.ok || !res.body) return
-
-        const reader  = res.body.getReader()
-        const decoder = new TextDecoder()
-        let   buffer  = ''
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const events = buffer.split(/\n\n/)
-          buffer = events.pop()
-
-          for (const event of events) {
-            for (const line of event.split('\n')) {
-              if (!line.startsWith('data: ')) continue
-              try {
-                const evt = JSON.parse(line.slice(6))
-                if (evt.type === 'ping' || evt.type === 'connected') continue
-
-                if (evt.type === 'agent_message') {
-                  addMessage('assistant', evt.text)
-                }
-
-                if (evt.type === 'mode_changed' && evt.mode === 'ai') {
-                  setMode('ai')
-                  addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
-                  closeListenStream()
-                  return
-                }
-              } catch {}
-            }
-          }
-        }
-      } catch (err) {
-        if (err.name === 'AbortError') return
-        console.error('[Mediko widget] Listen stream error:', err)
-      }
-    })()
-  }
-
-  function closeListenStream() {
-    listenRef.current?.abort()
-    listenRef.current = null
-  }
 
   function resetSession() {
     localStorage.removeItem(STORAGE_KEY)
@@ -333,17 +323,6 @@ export function useChat() {
     setError(null)
     setSessionId(null)
     setTimeout(() => addMessage('assistant', GREETING), 50)
-  }
-
-  // ── Helpers ──────────────────────────────────────────────
-
-  function addMessage(role, content) {
-    setMessages(prev => [...prev, {
-      id:      `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      role,
-      content,
-      ts:      new Date().toISOString()
-    }])
   }
 
   return { messages, isTyping, mode, error, sessionId, quickReplies, sendMessage, resetSession }
