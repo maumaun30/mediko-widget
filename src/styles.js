@@ -488,4 +488,50 @@ export const WIDGET_CSS = `/* ════════════════�
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--mdk-border); border-radius: 2px; }
+
+/* ══ Mobile responsive ════════════════════════════════════ */
+
+@media (max-width: 480px) {
+  .chat-window {
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
+    bottom: 0;
+    right: 0;
+    border-radius: 0;
+    border: none;
+  }
+
+  .fab-wrap {
+    bottom: 16px;
+    right: 16px;
+  }
+
+  .tooltip-popup {
+    right: 16px;
+    bottom: 94px;
+    font-size: 13px;
+    max-width: calc(100vw - 32px);
+    white-space: normal;
+  }
+
+  .bubble {
+    max-width: 92%;
+    font-size: 16px;
+  }
+
+  .msg-input {
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+  }
+
+  .quick-reply {
+    font-size: 13px;
+    padding: 7px 13px;
+  }
+
+  .header-name { font-size: 15px; }
+  .header-tagline { font-size: 11px; }
+}
+
 `

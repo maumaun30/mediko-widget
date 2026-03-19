@@ -260,37 +260,66 @@ export function useChat() {
    */
   function openListenStream(sid) {
     if (listenRef.current) return  // already open
-    const url = `${API_URL}/api/chat/listen/${sid}`
-    const es  = new EventSource(url, { withCredentials: false })
 
-    es.onmessage = (e) => {
+    // Use fetch + ReadableStream instead of EventSource so CORS works
+    // identically to the /api/chat endpoint (EventSource can't set headers
+    // and browser CORS rules differ between GET and EventSource)
+    const controller = new AbortController()
+    listenRef.current = controller
+
+    ;(async () => {
       try {
-        const evt = JSON.parse(e.data)
-        if (evt.type === 'ping') return
+        const res = await fetch(`${API_URL}/api/chat/listen/${sid}`, {
+          method:      'GET',
+          credentials: 'omit',
+          mode:        'cors',
+          signal:      controller.signal
+        })
 
-        if (evt.type === 'agent_message') {
-          // Add the agent reply as an assistant bubble
-          addMessage('assistant', evt.text)
+        if (!res.ok || !res.body) return
+
+        const reader  = res.body.getReader()
+        const decoder = new TextDecoder()
+        let   buffer  = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const events = buffer.split(/\n\n/)
+          buffer = events.pop()
+
+          for (const event of events) {
+            for (const line of event.split('\n')) {
+              if (!line.startsWith('data: ')) continue
+              try {
+                const evt = JSON.parse(line.slice(6))
+                if (evt.type === 'ping' || evt.type === 'connected') continue
+
+                if (evt.type === 'agent_message') {
+                  addMessage('assistant', evt.text)
+                }
+
+                if (evt.type === 'mode_changed' && evt.mode === 'ai') {
+                  setMode('ai')
+                  addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
+                  closeListenStream()
+                  return
+                }
+              } catch {}
+            }
+          }
         }
-
-        if (evt.type === 'mode_changed' && evt.mode === 'ai') {
-          // Agent returned control to AI — close listen stream, reset mode
-          setMode('ai')
-          addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
-          closeListenStream()
-        }
-      } catch {}
-    }
-
-    es.onerror = () => {
-      // Connection lost — retry is handled by EventSource automatically
-    }
-
-    listenRef.current = es
+      } catch (err) {
+        if (err.name === 'AbortError') return
+        console.error('[Mediko widget] Listen stream error:', err)
+      }
+    })()
   }
 
   function closeListenStream() {
-    listenRef.current?.close()
+    listenRef.current?.abort()
     listenRef.current = null
   }
 
