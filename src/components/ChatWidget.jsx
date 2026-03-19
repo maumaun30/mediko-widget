@@ -29,7 +29,7 @@ export function ChatWidget() {
 
   const {
     messages, isTyping, agentTyping, mode, error,
-    quickReplies, businessHours,
+    quickReplies,
     sendMessage, resetSession, rateMessage
   } = useChat()
 
@@ -63,13 +63,11 @@ export function ChatWidget() {
 
   function handleQuickReply(msg) { setOpen(true); setTimeout(() => sendMessage(msg), 100) }
 
-  const isAway   = businessHours?.businessHours?.enabled && businessHours?.isOpen === false
   const statusText = mode === 'agent'   ? '● Naka-konekta sa ahente'
                    : mode === 'handoff' ? '● Naghihintay ng ahente...'
-                   : isAway             ? '● Away — mag-iwan ng mensahe'
                    : '● Online — handang tumulong'
 
-  const showQuickReplies = messages.length <= 1 && mode === 'ai' && !isAway
+  const showQuickReplies = messages.length <= 1 && mode === 'ai'
 
   return (
     <>
@@ -96,7 +94,6 @@ export function ChatWidget() {
           {/* Away banner */}
           {isAway && (
             <div className="mode-banner handoff">
-              🕐 {businessHours?.businessHours?.awayMessage || 'Wala kaming available na agent ngayon.'}
             </div>
           )}
 
@@ -156,7 +153,7 @@ export function ChatWidget() {
               onKeyDown={handleKey}
               placeholder={mode === 'agent' ? 'Mag-type ng mensahe...' : 'I-type ang inyong tanong dito...'}
               rows={1}
-              disabled={isTyping || !isOpen}
+              disabled={!input.trim() || isTyping}
               aria-label="Message input"
             />
             <button className="send-btn" onClick={handleSend} disabled={!input.trim() || isTyping} aria-label="Ipadala">
