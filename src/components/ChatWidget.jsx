@@ -2,13 +2,6 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
 import { Message, TypingIndicator } from './Message.jsx'
 
-const QUICK_REPLIES = [
-  'Ano ang mga produkto ninyo?',
-  'Para sa kasukasuan at joints',
-  'Para sa immune system',
-  'Saan na ang aking order?',
-]
-
 // ── Icons ────────────────────────────────────────────────────
 
 const ChatIcon = () => (
@@ -66,7 +59,7 @@ export function ChatWidget() {
   const inputRef                         = useRef(null)
   const prevMsgCount                     = useRef(0)
 
-  const { messages, isTyping, mode, error, sendMessage, resetSession } = useChat()
+  const { messages, isTyping, mode, error, quickReplies, sendMessage, resetSession } = useChat()
 
   // Show tooltip after 2.5s on page load — not immediately so it feels natural
   useEffect(() => {
@@ -193,9 +186,9 @@ export function ChatWidget() {
           {/* Quick replies */}
           {showQuickReplies && (
             <div className="quick-replies">
-              {QUICK_REPLIES.map(q => (
-                <button key={q} className="quick-reply" onClick={() => handleQuickReply(q)}>
-                  {q}
+              {quickReplies.map(q => (
+                <button key={q.label} className="quick-reply" onClick={() => handleQuickReply(q.message)}>
+                  {q.label}
                 </button>
               ))}
             </div>

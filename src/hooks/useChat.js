@@ -17,12 +17,27 @@ export function useChat() {
   const [messages,  setMessages]  = useState([])
   const [isTyping,  setIsTyping]  = useState(false)
   const [sessionId, setSessionId] = useState(null)
-  const [mode,      setMode]      = useState('ai')
-  const [error,     setError]     = useState(null)
+  const [mode,        setMode]        = useState('ai')
+  const [error,       setError]       = useState(null)
+  const [quickReplies, setQuickReplies] = useState([])
   const abortRef    = useRef(null)
   const sessionRef  = useRef(null)   // mirror sessionId for callbacks
 
-  useEffect(() => { initSession() }, [])
+  useEffect(() => {
+    initSession()
+    fetchQuickReplies()
+  }, [])
+
+  async function fetchQuickReplies() {
+    try {
+      const res = await fetch(`${API_URL}/api/quick-replies`, { credentials: 'omit', mode: 'cors' })
+      if (!res.ok) return
+      const { quickReplies } = await res.json()
+      setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
+    } catch {
+      // fallback — empty, ChatWidget will show nothing
+    }
+  }
 
   // ── Session init ─────────────────────────────────────────
 
@@ -237,5 +252,5 @@ export function useChat() {
     setTimeout(initSession, 100)
   }
 
-  return { messages, isTyping, mode, error, sessionId, sendMessage, resetSession }
+  return { messages, isTyping, mode, error, sessionId, quickReplies, sendMessage, resetSession }
 }
