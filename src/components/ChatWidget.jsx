@@ -91,17 +91,11 @@ export function ChatWidget() {
             </div>
           </div>
 
-          {/* Away banner */}
-          {isAway && (
-            <div className="mode-banner handoff">
-            </div>
-          )}
-
           {/* Mode banners */}
-          {!isAway && mode === 'handoff' && (
+          {mode === 'handoff' && (
             <div className="mode-banner handoff">⏳ Sandali lang po — ikinokonekta kayo sa aming team.</div>
           )}
-          {!isAway && mode === 'agent' && (
+          {mode === 'agent' && (
             <div className="mode-banner agent">✅ Naka-konekta na kayo sa aming support team.</div>
           )}
 
