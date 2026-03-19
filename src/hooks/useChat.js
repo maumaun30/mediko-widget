@@ -1,85 +1,76 @@
 /**
- * useChat.js — fixed for Shopify cross-origin SSE streaming
+ * useChat.js
  *
- * Key fixes:
- *  1. Don't add the assistant message slot until first chunk arrives
- *     (avoids Shopify's div:empty → display:none killing the bubble)
- *  2. isTyping stays true until first chunk, not until fetch resolves
- *  3. Robust SSE line parsing that handles multi-line buffers correctly
- *  4. Explicit credentials: 'omit' and mode: 'cors' for cross-origin fetch
+ * Session is created LAZILY — only when the customer sends their first message.
+ * Page visits never hit the API. Returning visitors with a stored session
+ * still load their history normally.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 
-const API_URL = import.meta.env.VITE_API_URL
+const API_URL  = import.meta.env.VITE_API_URL
+const GREETING = 'Kumusta po! Ako si Medi, ang inyong Mediko assistant. Paano ko kayo matutulungan ngayon? 😊'
+const STORAGE_KEY = 'mediko_session_id'
 
 export function useChat() {
-  const [messages,  setMessages]  = useState([])
-  const [isTyping,  setIsTyping]  = useState(false)
-  const [sessionId, setSessionId] = useState(null)
-  const [mode,        setMode]        = useState('ai')
-  const [error,       setError]       = useState(null)
+  const [messages,     setMessages]     = useState([])
+  const [isTyping,     setIsTyping]     = useState(false)
+  const [sessionId,    setSessionId]    = useState(null)
+  const [mode,         setMode]         = useState('ai')
+  const [error,        setError]        = useState(null)
   const [quickReplies, setQuickReplies] = useState([])
+
+  const sessionRef  = useRef(null)   // mirrors sessionId for use inside callbacks
   const abortRef    = useRef(null)
-  const sessionRef  = useRef(null)   // mirror sessionId for callbacks
+  const initialised = useRef(false)  // prevents double-init in StrictMode
 
   useEffect(() => {
-    initSession()
+    if (initialised.current) return
+    initialised.current = true
     fetchQuickReplies()
+    restoreSession()
   }, [])
+
+  // ── Quick replies (public, no auth) ─────────────────────
 
   async function fetchQuickReplies() {
     try {
-      const res = await fetch(`${API_URL}/api/quick-replies`, { credentials: 'omit', mode: 'cors' })
+      const res = await fetch(`${API_URL}/api/quick-replies`, {
+        credentials: 'omit', mode: 'cors'
+      })
       if (!res.ok) return
       const { quickReplies } = await res.json()
       setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
-    } catch {
-      // fallback — empty, ChatWidget will show nothing
-    }
+    } catch { /* graceful degradation — widget still works without quick replies */ }
   }
 
-  // ── Session init ─────────────────────────────────────────
+  // ── Session restore (returning visitors only) ────────────
 
-  async function initSession() {
-    const stored = localStorage.getItem('mediko_session_id')
-    if (stored) {
-      sessionRef.current = stored
-      setSessionId(stored)
-      await loadHistory(stored)
+  async function restoreSession() {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (!stored) {
+      // New visitor — show greeting locally, no API call yet
+      addMessage('assistant', GREETING)
       return
     }
-    try {
-      const res = await fetch(`${API_URL}/api/chat/session`, {
-        method:      'POST',
-        headers:     { 'Content-Type': 'application/json' },
-        credentials: 'omit',
-        mode:        'cors',
-        body:        JSON.stringify({ metadata: { url: location.href } })
-      })
-      const { sessionId: id } = await res.json()
-      localStorage.setItem('mediko_session_id', id)
-      sessionRef.current = id
-      setSessionId(id)
-      addMessage('assistant', 'Kumusta po! Ako si Medi, ang inyong Mediko assistant. Paano ko kayo matutulungan ngayon? 😊')
-    } catch (e) {
-      setError('Hindi makakonekta sa server. I-refresh po ang page.')
-    }
-  }
 
-  async function loadHistory(sid) {
+    // Returning visitor — verify session still exists and load history
     try {
-      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, {
-        credentials: 'omit',
-        mode:        'cors'
+      const res = await fetch(`${API_URL}/api/chat/history/${stored}`, {
+        credentials: 'omit', mode: 'cors'
       })
+
       if (!res.ok) {
-        localStorage.removeItem('mediko_session_id')
-        sessionRef.current = null
-        initSession()
+        // Session expired or not found — treat as new visitor
+        localStorage.removeItem(STORAGE_KEY)
+        addMessage('assistant', GREETING)
         return
       }
+
       const { messages: history } = await res.json()
+      sessionRef.current = stored
+      setSessionId(stored)
+
       if (history.length) {
         setMessages(history.map(m => ({
           id:      m.id,
@@ -88,40 +79,70 @@ export function useChat() {
           ts:      m.created_at
         })))
       } else {
-        addMessage('assistant', 'Kumusta po! Ako si Medi, ang inyong Mediko assistant. Paano ko kayo matutulungan ngayon? 😊')
+        addMessage('assistant', GREETING)
       }
     } catch {
-      addMessage('assistant', 'Kumusta po! Ako si Medi. Paano ko kayo matutulungan?')
+      addMessage('assistant', GREETING)
+    }
+  }
+
+  // ── Lazy session creation ────────────────────────────────
+
+  /**
+   * Create a session on the first message send.
+   * Returns the new sessionId, or null on failure.
+   */
+  async function createSession() {
+    try {
+      const res = await fetch(`${API_URL}/api/chat/session`, {
+        method:      'POST',
+        headers:     { 'Content-Type': 'application/json' },
+        credentials: 'omit',
+        mode:        'cors',
+        body:        JSON.stringify({ metadata: { url: location.href } })
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const { sessionId: id } = await res.json()
+      localStorage.setItem(STORAGE_KEY, id)
+      sessionRef.current = id
+      setSessionId(id)
+      return id
+    } catch {
+      setError('Hindi makakonekta sa server. I-refresh po ang page.')
+      return null
     }
   }
 
   // ── Send message ─────────────────────────────────────────
 
   const sendMessage = useCallback(async (text) => {
-    const sid = sessionRef.current
-    if (!text.trim() || !sid || isTyping) return
+    if (!text.trim() || isTyping) return
 
     setError(null)
     addMessage('user', text)
     setIsTyping(true)
 
+    // Create session lazily on first ever message
+    let sid = sessionRef.current
+    if (!sid) {
+      sid = await createSession()
+      if (!sid) { setIsTyping(false); return }
+    }
+
     abortRef.current?.abort()
     abortRef.current = new AbortController()
 
-    // assistantId is created here but the message slot is added only
-    // when the first chunk arrives — prevents Shopify hiding an empty div
-    const assistantId   = `msg-${Date.now()}`
-    let   slotAdded     = false
-    let   fullContent   = ''
+    const assistantId = `msg-${Date.now()}`
+    let   slotAdded   = false
+    let   fullContent = ''
 
     function ensureSlot() {
       if (!slotAdded) {
         slotAdded = true
         setIsTyping(false)
-        setMessages(prev => [
-          ...prev,
-          { id: assistantId, role: 'assistant', content: '', ts: new Date().toISOString() }
-        ])
+        setMessages(prev => [...prev, {
+          id: assistantId, role: 'assistant', content: '', ts: new Date().toISOString()
+        }])
       }
     }
 
@@ -144,24 +165,15 @@ export function useChat() {
 
       while (true) {
         const { done, value } = await reader.read()
-
         if (done) {
-          // Process any remaining buffer content on stream close
           if (buffer.trim()) processLine(buffer.trim())
           break
         }
-
         buffer += decoder.decode(value, { stream: true })
-
-        // Split on double-newline (SSE event delimiter)
         const events = buffer.split(/\n\n/)
-        buffer = events.pop()  // last element may be incomplete
-
+        buffer = events.pop()
         for (const event of events) {
-          // Each event may have multiple lines; find the data: line
-          for (const line of event.split('\n')) {
-            processLine(line)
-          }
+          for (const line of event.split('\n')) processLine(line)
         }
       }
 
@@ -169,14 +181,11 @@ export function useChat() {
       if (err.name === 'AbortError') return
       console.error('[Mediko widget] Stream error:', err)
       setIsTyping(false)
-      // Remove empty slot if it was added but no content came through
       if (slotAdded && !fullContent) {
         setMessages(prev => prev.filter(m => m.id !== assistantId))
       }
       setError('May nangyaring mali. Subukan ulit po.')
     }
-
-    // ── SSE line processor ──────────────────────────────────
 
     function processLine(line) {
       if (!line.startsWith('data: ')) return
@@ -184,22 +193,17 @@ export function useChat() {
       try { evt = JSON.parse(line.slice(6)) } catch { return }
 
       switch (evt.type) {
-
         case 'chunk':
           ensureSlot()
           fullContent += evt.text
           setMessages(prev => prev.map(m =>
-            m.id === assistantId
-              ? { ...m, content: m.content + evt.text }
-              : m
+            m.id === assistantId ? { ...m, content: m.content + evt.text } : m
           ))
           break
-
         case 'done':
-          ensureSlot()   // in case model returned empty string
+          ensureSlot()
           setIsTyping(false)
           break
-
         case 'handoff':
           ensureSlot()
           setMode('handoff')
@@ -208,7 +212,6 @@ export function useChat() {
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
           break
-
         case 'agent_mode':
           ensureSlot()
           setMode('agent')
@@ -217,12 +220,9 @@ export function useChat() {
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
           break
-
         case 'error':
           setIsTyping(false)
-          if (slotAdded) {
-            setMessages(prev => prev.filter(m => m.id !== assistantId))
-          }
+          if (slotAdded) setMessages(prev => prev.filter(m => m.id !== assistantId))
           setError(evt.message)
           break
       }
@@ -230,7 +230,21 @@ export function useChat() {
 
   }, [isTyping])
 
-  // ── Helpers ───────────────────────────────────────────────
+  // ── Reset ────────────────────────────────────────────────
+
+  function resetSession() {
+    localStorage.removeItem(STORAGE_KEY)
+    sessionRef.current = null
+    abortRef.current?.abort()
+    setMessages([])
+    setMode('ai')
+    setError(null)
+    setSessionId(null)
+    // Show greeting again without creating a session
+    setTimeout(() => addMessage('assistant', GREETING), 50)
+  }
+
+  // ── Helpers ──────────────────────────────────────────────
 
   function addMessage(role, content) {
     setMessages(prev => [...prev, {
@@ -239,17 +253,6 @@ export function useChat() {
       content,
       ts:      new Date().toISOString()
     }])
-  }
-
-  function resetSession() {
-    localStorage.removeItem('mediko_session_id')
-    sessionRef.current = null
-    abortRef.current?.abort()
-    setMessages([])
-    setMode('ai')
-    setError(null)
-    setSessionId(null)
-    setTimeout(initSession, 100)
   }
 
   return { messages, isTyping, mode, error, sessionId, quickReplies, sendMessage, resetSession }
