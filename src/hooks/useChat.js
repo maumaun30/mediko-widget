@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 
 const API_URL     = import.meta.env.VITE_API_URL
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const GREETING    = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY = 'mediko_session_id'
 
@@ -12,27 +14,10 @@ export function useChat() {
   const [error,        setError]        = useState(null)
   const [quickReplies, setQuickReplies] = useState([])
 
-  // Stable refs — never stale inside async callbacks
-  const sessionRef    = useRef(null)
-  const abortRef      = useRef(null)   // aborts the chat SSE stream
-  const listenRef     = useRef(null)   // aborts the agent listen stream
-  const initialised   = useRef(false)
-  const setMessagesRef = useRef(setMessages)
-  const setModeRef     = useRef(setMode)
-  const setIsTypingRef = useRef(setIsTyping)
-  const setErrorRef    = useRef(setError)
-
-  // Keep refs in sync with latest setters (always stable in React)
-  useEffect(() => { setMessagesRef.current = setMessages }, [])
-
-  useEffect(() => {
-    if (initialised.current) return
-    initialised.current = true
-    fetchQuickReplies()
-    restoreSession()
-  }, [])
-
-  // ── Stable addMessage (uses ref, never stale) ────────────
+  const sessionRef  = useRef(null)
+  const abortRef    = useRef(null)
+  const realtimeRef = useRef(null)   // Supabase realtime channel
+  const initialised = useRef(false)
 
   const addMessage = useCallback((role, content) => {
     setMessages(prev => [...prev, {
@@ -43,11 +28,20 @@ export function useChat() {
     }])
   }, [])
 
+  useEffect(() => {
+    if (initialised.current) return
+    initialised.current = true
+    fetchQuickReplies()
+    restoreSession()
+  }, [])
+
   // ── Quick replies ────────────────────────────────────────
 
   async function fetchQuickReplies() {
     try {
-      const res = await fetch(`${API_URL}/api/quick-replies`, { credentials: 'omit', mode: 'cors' })
+      const res = await fetch(`${API_URL}/api/quick-replies`, {
+        credentials: 'omit', mode: 'cors'
+      })
       if (!res.ok) return
       const { quickReplies } = await res.json()
       setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
@@ -85,7 +79,7 @@ export function useChat() {
         addMessage('assistant', GREETING)
       }
 
-      // Check mode — if already in agent mode, open listen stream
+      // Check mode — subscribe to realtime if already in agent/handoff mode
       try {
         const modeRes = await fetch(`${API_URL}/api/chat/mode/${stored}`, {
           credentials: 'omit', mode: 'cors'
@@ -94,7 +88,7 @@ export function useChat() {
           const { mode: currentMode } = await modeRes.json()
           if (currentMode === 'agent' || currentMode === 'handoff') {
             setMode(currentMode)
-            openListenStream(stored)
+            subscribeRealtime(stored)
           }
         }
       } catch {}
@@ -125,73 +119,97 @@ export function useChat() {
     }
   }
 
-  // ── Agent listen stream ──────────────────────────────────
-  // Defined as a stable function using refs — never stale in closures
+  // ── Supabase Realtime subscription ──────────────────────
+  // Subscribes to the chat_messages table for this session.
+  // Fires when a new row is inserted — picks up agent replies instantly
+  // regardless of which server instance processed the agent command.
 
-  function openListenStream(sid) {
-    if (listenRef.current) return  // already open
+  function subscribeRealtime(sid) {
+    if (realtimeRef.current) return  // already subscribed
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.warn('[Mediko] Supabase env vars not set — agent real-time unavailable')
+      return
+    }
 
-    const controller = new AbortController()
-    listenRef.current = controller
+    // Use Supabase Realtime REST API directly (no SDK needed in widget)
+    // Connect to the realtime websocket
+    const wsUrl = `${SUPABASE_URL}/realtime/v1/websocket?apikey=${SUPABASE_ANON_KEY}&vsn=1.0.0`
+      .replace('https://', 'wss://')
+      .replace('http://', 'ws://')
 
-    // Capture stable callbacks via closure over the useCallback versions
-    const _addMessage = addMessage
+    const ws = new WebSocket(wsUrl)
+    realtimeRef.current = ws
 
-    ;(async () => {
+    ws.onopen = () => {
+      // Join the postgres_changes channel for this session's messages
+      ws.send(JSON.stringify({
+        topic:   `realtime:public:chat_messages:session_id=eq.${sid}`,
+        event:   'phx_join',
+        payload: {
+          config: {
+            broadcast:  { self: false },
+            presence:   { key: '' },
+            postgres_changes: [{
+              event:  'INSERT',
+              schema: 'public',
+              table:  'chat_messages',
+              filter: `session_id=eq.${sid}`
+            }]
+          }
+        },
+        ref: '1'
+      }))
+    }
+
+    ws.onmessage = (e) => {
       try {
-        const res = await fetch(`${API_URL}/api/chat/listen/${sid}`, {
-          method: 'GET', credentials: 'omit', mode: 'cors',
-          signal: controller.signal
-        })
+        const msg = JSON.parse(e.data)
 
-        if (!res.ok || !res.body) {
-          console.error('[Mediko] Listen stream failed:', res.status)
+        // Heartbeat reply
+        if (msg.event === 'heartbeat') {
+          ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: msg.ref }))
           return
         }
 
-        const reader  = res.body.getReader()
-        const decoder = new TextDecoder()
-        let   buffer  = ''
+        // Postgres INSERT event
+        if (msg.event === 'postgres_changes' || msg.payload?.event === 'INSERT') {
+          const record = msg.payload?.data?.record || msg.payload?.record
+          if (!record) return
+          if (record.session_id !== sid) return
+          // Only show assistant messages (agent replies) — not the user's own messages
+          if (record.role !== 'assistant') return
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+          const content = record.content || ''
 
-          buffer += decoder.decode(value, { stream: true })
-          const events = buffer.split(/\n\n/)
-          buffer = events.pop()
-
-          for (const event of events) {
-            for (const line of event.split('\n')) {
-              if (!line.startsWith('data: ')) continue
-              try {
-                const evt = JSON.parse(line.slice(6))
-                if (evt.type === 'ping' || evt.type === 'connected') continue
-
-                if (evt.type === 'agent_message') {
-                  _addMessage('assistant', evt.text)
-                }
-
-                if (evt.type === 'mode_changed' && evt.mode === 'ai') {
-                  setMode('ai')
-                  _addMessage('assistant', 'Naibalik na po kayo sa aming AI assistant na si Medi. Paano ko pa kayo matutulungan?')
-                  closeListenStream()
-                  return
-                }
-              } catch {}
-            }
+          // Mode changed back to AI
+          if (content.includes('Naibalik na po kayo')) {
+            setMode('ai')
+            addMessage('assistant', content)
+            unsubscribeRealtime()
+            return
           }
+
+          addMessage('assistant', content)
         }
-      } catch (err) {
-        if (err.name === 'AbortError') return
-        console.error('[Mediko] Listen stream error:', err)
-      }
-    })()
+
+        // Session mode changed to AI via phx event
+        if (msg.payload?.mode === 'ai') {
+          setMode('ai')
+          unsubscribeRealtime()
+        }
+
+      } catch {}
+    }
+
+    ws.onerror = () => {}
+    ws.onclose = () => { realtimeRef.current = null }
   }
 
-  function closeListenStream() {
-    listenRef.current?.abort()
-    listenRef.current = null
+  function unsubscribeRealtime() {
+    if (realtimeRef.current) {
+      try { realtimeRef.current.close() } catch {}
+      realtimeRef.current = null
+    }
   }
 
   // ── Send message ─────────────────────────────────────────
@@ -203,7 +221,6 @@ export function useChat() {
     addMessage('user', text)
     setIsTyping(true)
 
-    // Lazy session creation on first message
     let sid = sessionRef.current
     if (!sid) {
       sid = await createSession()
@@ -289,7 +306,7 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
-          openListenStream(sid)
+          subscribeRealtime(sid)
           break
         case 'agent_mode':
           ensureSlot()
@@ -298,7 +315,7 @@ export function useChat() {
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
-          openListenStream(sid)
+          subscribeRealtime(sid)
           break
         case 'error':
           setIsTyping(false)
@@ -317,7 +334,7 @@ export function useChat() {
     localStorage.removeItem(STORAGE_KEY)
     sessionRef.current = null
     abortRef.current?.abort()
-    closeListenStream()
+    unsubscribeRealtime()
     setMessages([])
     setMode('ai')
     setError(null)

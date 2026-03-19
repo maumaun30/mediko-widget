@@ -4,10 +4,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
-    'process.env.NODE_ENV':       JSON.stringify('production'),
-    'import.meta.env.VITE_API_URL': JSON.stringify(
-      process.env.VITE_API_URL || 'https://mediko-chatbot-production.up.railway.app'
-    )
+    'process.env.NODE_ENV':              JSON.stringify('production'),
+    'import.meta.env.VITE_API_URL':      JSON.stringify(process.env.VITE_API_URL      || 'https://mediko-chatbot-production.up.railway.app'),
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
   },
   build: {
     lib: {
@@ -16,13 +16,7 @@ export default defineConfig({
       fileName: 'mediko-chat',
       formats:  ['iife']
     },
-    rollupOptions: {
-      external: [],
-      output: {
-        // CSS is handled as a JS string in styles.js — no separate asset needed
-        assetFileNames: '[name][extname]'
-      }
-    },
+    rollupOptions: { external: [] },
     outDir:                  'dist',
     emptyOutDir:             true,
     cssCodeSplit:            false,
