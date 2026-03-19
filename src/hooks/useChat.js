@@ -9,7 +9,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 
 const API_URL  = import.meta.env.VITE_API_URL
-const GREETING = 'Kumusta po! Ako si Medi, ang inyong Mediko assistant. Paano ko kayo matutulungan ngayon? 😊'
+const GREETING = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY = 'mediko_session_id'
 
 export function useChat() {
