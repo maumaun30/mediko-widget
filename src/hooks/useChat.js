@@ -125,14 +125,14 @@ export function useChat() {
   // regardless of which server instance processed the agent command.
 
   function subscribeRealtime(sid) {
-    if (realtimeRef.current) return  // already subscribed
+    if (realtimeRef.current) return
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      console.warn('[Mediko] Supabase env vars not set — agent real-time unavailable')
+      console.warn('[Mediko] Supabase env vars not set')
       return
     }
 
-    // Use Supabase Realtime REST API directly (no SDK needed in widget)
-    // Connect to the realtime websocket
+    // Supabase Realtime v2 — correct channel topic format and event names
+    const CHANNEL_ID = `mediko-agent-${sid}`
     const wsUrl = `${SUPABASE_URL}/realtime/v1/websocket?apikey=${SUPABASE_ANON_KEY}&vsn=1.0.0`
       .replace('https://', 'wss://')
       .replace('http://', 'ws://')
@@ -140,15 +140,22 @@ export function useChat() {
     const ws = new WebSocket(wsUrl)
     realtimeRef.current = ws
 
+    let heartbeatTimer = null
+
     ws.onopen = () => {
-      // Join the postgres_changes channel for this session's messages
+      // Send heartbeat every 30s to keep connection alive
+      heartbeatTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: 'hb' }))
+        }
+      }, 30000)
+
+      // Join with Supabase Realtime v2 format
       ws.send(JSON.stringify({
-        topic:   `realtime:public:chat_messages:session_id=eq.${sid}`,
+        topic:   `realtime:${CHANNEL_ID}`,
         event:   'phx_join',
         payload: {
           config: {
-            broadcast:  { self: false },
-            presence:   { key: '' },
             postgres_changes: [{
               event:  'INSERT',
               schema: 'public',
@@ -165,24 +172,29 @@ export function useChat() {
       try {
         const msg = JSON.parse(e.data)
 
-        // Heartbeat reply
-        if (msg.event === 'heartbeat') {
-          ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: msg.ref }))
+        // Ignore heartbeat ack
+        if (msg.topic === 'phoenix') return
+
+        // JOIN confirmation
+        if (msg.event === 'phx_reply' && msg.ref === '1') {
+          if (msg.payload?.status !== 'ok') {
+            console.error('[Mediko] Realtime join failed:', msg.payload?.response)
+          }
           return
         }
 
-        // Postgres INSERT event
-        if (msg.event === 'postgres_changes' || msg.payload?.event === 'INSERT') {
-          const record = msg.payload?.data?.record || msg.payload?.record
+        // Postgres change event — Supabase v2 wraps in payload.data
+        if (msg.event === 'postgres_changes') {
+          const record = msg.payload?.data?.record
           if (!record) return
-          if (record.session_id !== sid) return
-          // Only show assistant messages (agent replies) — not the user's own messages
           if (record.role !== 'assistant') return
 
-          const content = record.content || ''
+          // Strip [Agent] prefix for display
+          const raw     = record.content || ''
+          const content = raw.startsWith('[Agent] ') ? raw.slice(8) : raw
 
-          // Mode changed back to AI
-          if (content.includes('Naibalik na po kayo')) {
+          // Detect return-to-AI (saved by dispatchHandoffReturn)
+          if (raw.includes('Naibalik na po')) {
             setMode('ai')
             addMessage('assistant', content)
             unsubscribeRealtime()
@@ -192,17 +204,14 @@ export function useChat() {
           addMessage('assistant', content)
         }
 
-        // Session mode changed to AI via phx event
-        if (msg.payload?.mode === 'ai') {
-          setMode('ai')
-          unsubscribeRealtime()
-        }
-
       } catch {}
     }
 
     ws.onerror = () => {}
-    ws.onclose = () => { realtimeRef.current = null }
+    ws.onclose = () => {
+      clearInterval(heartbeatTimer)
+      realtimeRef.current = null
+    }
   }
 
   function unsubscribeRealtime() {
@@ -316,6 +325,10 @@ export function useChat() {
             m.id === assistantId ? { ...m, content: evt.message } : m
           ))
           subscribeRealtime(sid)
+          break
+        case 'agent_ack':
+          // Customer message forwarded to agent — no response shown
+          setIsTyping(false)
           break
         case 'error':
           setIsTyping(false)

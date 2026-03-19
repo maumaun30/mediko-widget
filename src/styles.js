@@ -1,4 +1,3 @@
-// Widget styles as a plain JS string — reliable in Vite IIFE library mode.
 export const WIDGET_CSS = `/* ═══════════════════════════════════════════════════════
    Mediko Chat Widget — Senior-Friendly Redesign
    Primary: #187adc  Secondary: #ffb73a  Font: Poppins
