@@ -14,6 +14,7 @@ export function useChat() {
   const [mode,          setMode]          = useState('ai')
   const [error,         setError]         = useState(null)
   const [quickReplies,  setQuickReplies]  = useState([])
+  const [aiEnabled,     setAiEnabled]     = useState(true)
 
   const sessionRef  = useRef(null)
   const abortRef    = useRef(null)
@@ -31,9 +32,21 @@ export function useChat() {
   useEffect(() => {
     if (initialised.current) return
     initialised.current = true
+    fetchConfig()
     fetchQuickReplies()
     restoreSession()
   }, [])
+
+  // ── Config (AI kill-switch, etc.) ────────────────────────
+
+  async function fetchConfig() {
+    try {
+      const res = await fetch(`${API_URL}/api/chat/config`, { credentials: 'omit', mode: 'cors' })
+      if (!res.ok) return
+      const cfg = await res.json()
+      if (typeof cfg.aiEnabled === 'boolean') setAiEnabled(cfg.aiEnabled)
+    } catch {}
+  }
 
   // ── Quick replies ────────────────────────────────────────
 
@@ -267,7 +280,7 @@ export function useChat() {
 
   return {
     messages, isTyping, agentTyping, mode, error,
-    sessionId, quickReplies,
+    sessionId, quickReplies, aiEnabled,
     sendMessage, resetSession, rateMessage
   }
 }

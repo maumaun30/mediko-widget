@@ -30,7 +30,7 @@ export function ChatWidget() {
 
   const {
     messages, isTyping, agentTyping, mode, error,
-    quickReplies,
+    quickReplies, aiEnabled,
     sendMessage, resetSession, rateMessage
   } = useChat()
 
@@ -69,11 +69,14 @@ export function ChatWidget() {
     sendMessage('Gusto ko pong makausap ang isang ahente.')
   }
 
+  const aiOff = !aiEnabled && mode === 'ai'
+
   const statusText = mode === 'agent'   ? '● Naka-konekta sa ahente'
                    : mode === 'handoff' ? '● Naghihintay ng ahente...'
+                   : aiOff               ? '● Live agent support lang pansamantala'
                    : '● Online — handang tumulong'
 
-  const showQuickReplies = messages.length <= 1 && mode === 'ai'
+  const showQuickReplies = messages.length <= 1 && mode === 'ai' && !aiOff
 
   return (
     <>
@@ -102,6 +105,11 @@ export function ChatWidget() {
           </div>
 
           {/* Mode banners */}
+          {aiOff && (
+            <div className="mode-banner ai-off">
+              ℹ️ Pansamantalang hindi available ang AI assistant. Pindutin ang button sa ibaba para makausap ang ahente.
+            </div>
+          )}
           {mode === 'handoff' && (
             <div className="mode-banner handoff">⏳ Sandali lang po — ikinokonekta kayo sa aming team.</div>
           )}
@@ -147,6 +155,15 @@ export function ChatWidget() {
             </div>
           )}
 
+          {/* AI-off prominent CTA */}
+          {aiOff && (
+            <div className="agent-cta-wrap">
+              <button className="agent-cta" onClick={handleTalkToAgent} disabled={isTyping}>
+                <AgentIcon /> Kausapin ang Ahente
+              </button>
+            </div>
+          )}
+
           {/* Input */}
           <div className="input-area">
             <textarea
@@ -155,7 +172,9 @@ export function ChatWidget() {
               value={input}
               onChange={e => { setInput(e.target.value); autoResize(e) }}
               onKeyDown={handleKey}
-              placeholder={mode === 'agent' ? 'Mag-type ng mensahe...' : 'I-type ang inyong tanong dito...'}
+              placeholder={mode === 'agent' ? 'Mag-type ng mensahe...'
+                         : aiOff             ? 'Pindutin ang "Kausapin ang Ahente" sa itaas...'
+                         : 'I-type ang inyong tanong dito...'}
               rows={1}
               disabled={isTyping}
               aria-label="Message input"

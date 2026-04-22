@@ -264,6 +264,38 @@
 }
 .mode-banner.handoff { background: var(--mdk-secondary-lt); color: #7a5000; }
 .mode-banner.agent   { background: #edfcf2; color: #166534; }
+.mode-banner.ai-off  { background: #fff4e0; color: #8a4b00; line-height: 1.4; }
+
+/* ══ Agent CTA (shown when AI is off) ═════════════════════ */
+.agent-cta-wrap {
+  padding: 6px 16px 14px;
+  flex-shrink: 0;
+}
+.agent-cta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #ffb73a 0%, #ffa017 100%);
+  color: #1a2e4a;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 13px 16px;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255,183,58,.45);
+  transition: transform .15s, box-shadow .2s, opacity .2s;
+}
+.agent-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255,183,58,.55);
+}
+.agent-cta:active:not(:disabled) { transform: translateY(0); }
+.agent-cta:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.agent-cta svg { width: 18px; height: 18px; fill: #1a2e4a; }
 
 /* ══ Messages ════════════════════════════════════════════ */
 
