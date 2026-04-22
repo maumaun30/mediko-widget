@@ -240,7 +240,15 @@
   transition: background .15s;
 }
 .icon-btn:hover { background: rgba(255,255,255,.3); }
+.icon-btn:disabled { opacity: .5; cursor: default; }
 .icon-btn svg   { width: 16px; height: 16px; fill: #fff; }
+
+.icon-btn.agent-btn {
+  background: var(--mdk-secondary);
+  border-color: rgba(255,255,255,.55);
+}
+.icon-btn.agent-btn:hover:not(:disabled) { background: var(--mdk-secondary-dk); }
+.icon-btn.agent-btn svg { fill: #1a2e4a; }
 
 /* ══ Mode banner ══════════════════════════════════════════ */
 
