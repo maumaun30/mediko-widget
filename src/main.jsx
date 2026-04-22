@@ -2,9 +2,9 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { ChatWidget } from './components/ChatWidget.jsx'
 
-// CSS is inlined as a plain string — avoids Vite ?inline issues in IIFE mode.
-// Import the raw CSS text via the shared styles module below.
-import { WIDGET_CSS } from './styles.js'
+// Vite's ?raw query returns the file as a plain string at build time —
+// single source of truth, no sync between widget.css and a JS copy.
+import WIDGET_CSS from './widget.css?raw'
 
 function mount() {
   if (document.getElementById('mediko-chat-root')) return
