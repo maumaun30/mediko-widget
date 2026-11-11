@@ -1,8 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 
 const API_URL          = import.meta.env.VITE_API_URL
-const SUPABASE_URL     = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON    = import.meta.env.VITE_SUPABASE_ANON_KEY
 const GREETING         = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY      = 'mediko_session_id'
 
@@ -100,60 +98,54 @@ export function useChat() {
     } catch { setError('Hindi makakonekta sa server. I-refresh po ang page.'); return null }
   }
 
-  // ── Supabase Realtime ─────────────────────────────────────
+  // ── Realtime (agent push) via the API's SSE /listen stream ──
+  // Replaces the old Supabase Realtime WebSocket. The server pushes:
+  //   { type: 'agent_message', text }  — agent reply
+  //   { type: 'agent_typing', ... }    — agent typing indicator
+  //   { type: 'mode_changed',  mode }  — handed back to AI (mode='ai') or taken over
+  //   { type: 'connected' | 'ping' }   — lifecycle/keepalive (ignored)
+  // EventSource is a native browser API and auto-reconnects on drop.
 
   function subscribeRealtime(sid) {
     if (realtimeRef.current) return
-    if (!SUPABASE_URL || !SUPABASE_ANON) return
 
-    const wsUrl = `${SUPABASE_URL}/realtime/v1/websocket?apikey=${SUPABASE_ANON}&vsn=1.0.0`
-      .replace('https://', 'wss://').replace('http://', 'ws://')
+    const es = new EventSource(`${API_URL}/api/chat/listen/${sid}`)
+    realtimeRef.current = es
 
-    const ws = new WebSocket(wsUrl)
-    realtimeRef.current = ws
-    let heartbeatTimer = null
+    es.onmessage = (e) => {
+      let evt
+      try { evt = JSON.parse(e.data) } catch { return }
 
-    ws.onopen = () => {
-      heartbeatTimer = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN)
-          ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: 'hb' }))
-      }, 30000)
-      ws.send(JSON.stringify({
-        topic:   `realtime:mediko-agent-${sid}`,
-        event:   'phx_join',
-        payload: {
-          config: {
-            postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${sid}` }]
-          }
-        },
-        ref: '1'
-      }))
-    }
-
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.topic === 'phoenix') return
-        if (msg.event === 'phx_reply') return
-
-        if (msg.event === 'postgres_changes') {
-          const record = msg.payload?.data?.record
-          if (!record || record.role !== 'assistant') return
-          const raw     = record.content || ''
-          const content = raw.startsWith('[Agent] ') ? raw.slice(8) : raw
-          if (raw.includes('Naibalik na po')) {
-            setMode('ai'); addMessage('assistant', content); unsubscribeRealtime(); return
-          }
-          // Clear agent typing indicator when message arrives
+      switch (evt.type) {
+        case 'agent_message': {
           setAgentTyping(false)
           clearTimeout(agentTypingTimer.current)
+          const raw     = evt.text || ''
+          const content = raw.startsWith('[Agent] ') ? raw.slice(8) : raw
           addMessage('assistant', content)
+          break
         }
-      } catch {}
+        case 'agent_typing': {
+          setAgentTyping(true)
+          clearTimeout(agentTypingTimer.current)
+          agentTypingTimer.current = setTimeout(() => setAgentTyping(false), 8000)
+          break
+        }
+        case 'mode_changed': {
+          if (evt.mode === 'ai') {
+            setMode('ai')
+            setAgentTyping(false)
+            addMessage('assistant', 'Naibalik na po kayo sa aming Mediko Assistant. Paano ko pa kayo matutulungan?')
+          } else if (evt.mode === 'agent') {
+            setMode('agent')
+          }
+          break
+        }
+        // 'connected', 'ping' — no-op
+      }
     }
 
-    ws.onerror = () => {}
-    ws.onclose = () => { clearInterval(heartbeatTimer); realtimeRef.current = null }
+    es.onerror = () => { /* EventSource reconnects automatically */ }
   }
 
   function unsubscribeRealtime() {

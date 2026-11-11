@@ -1,4 +1,16 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+
+const API_URL = import.meta.env.VITE_API_URL
+
+function formatPrice(amount, currency = 'PHP') {
+  if (amount == null || amount === '') return ''
+  const n = parseFloat(amount)
+  if (Number.isNaN(n)) return ''
+  return `${currency === 'PHP' ? '₱' : ''}${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// Small module-level cache so the same product isn't re-fetched per card/render.
+const productCache = new Map()
 
 // ── Product card renderer ────────────────────────────────
 // Detects [[PRODUCT:title|price|url|image]] tags injected by the API
@@ -80,24 +92,58 @@ function renderContent(text) {
   return { elements, productLinks }
 }
 
+// Render a single line of text, turning **bold** into <strong>.
+function renderInline(text, keyBase) {
+  const out = []
+  const re = /\*\*([^*]+)\*\*/g
+  let last = 0, m, k = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(<span key={`${keyBase}-t${k++}`}>{text.slice(last, m.index)}</span>)
+    out.push(<strong key={`${keyBase}-b${k++}`}>{m[1]}</strong>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push(<span key={`${keyBase}-t${k++}`}>{text.slice(last)}</span>)
+  return out
+}
+
 function pushText(str, key, elements) {
   if (!str) return
   const lines = str.split('\n')
   lines.forEach((line, j) => {
     if (j > 0) elements.push(<br key={`${key}-br-${j}`} />)
-    if (line)  elements.push(<span key={`${key}-${j}`}>{line}</span>)
+    // Strip a leading markdown bullet marker (*, -, +) → render a clean •
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/)
+    const content = bullet ? bullet[1] : line
+    if (bullet) elements.push(<span key={`${key}-${j}-li`} className="li-bullet">• </span>)
+    if (content) elements.push(...renderInline(content, `${key}-${j}`))
   })
 }
 
 function ProductCard({ label, url }) {
-  // Extract handle from URL for display
   const handle = url.split('/products/')[1]?.split('?')[0] || ''
+  const [data, setData] = useState(() => productCache.get(handle) || null)
+
+  useEffect(() => {
+    if (!handle || data) return
+    let alive = true
+    fetch(`${API_URL}/api/products/by-handle/${handle}`, { credentials: 'omit', mode: 'cors' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d) { productCache.set(handle, d); if (alive) setData(d) } })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [handle])
+
+  const title = data?.title || label
+  const price = formatPrice(data?.price, data?.currency)
+
   return (
     <a className="product-card" href={url} target="_blank" rel="noopener noreferrer">
-      <div className="product-card-img-placeholder">💊</div>
+      {data?.image
+        ? <img className="product-card-img" src={data.image} alt={title} loading="lazy" />
+        : <div className="product-card-img-placeholder">💊</div>}
       <div className="product-card-info">
-        <div className="product-card-name">{label}</div>
-        <div className="product-card-price">store.mediko.ph</div>
+        <div className="product-card-name">{title}</div>
+        <div className="product-card-price">{price || ' '}</div>
       </div>
       <span className="product-card-arrow">→</span>
     </a>
@@ -115,7 +161,7 @@ export function Message({ role, content, ts, showLabel }) {
   return (
     <div className={`msg-row ${role}`}>
       {role === 'assistant' && showLabel && (
-        <div className="bot-label">Medi</div>
+        <div className="bot-label">Mediko Assistant</div>
       )}
       <div className="bubble">{elements}</div>
       {productLinks.length > 0 && role === 'assistant' && (
@@ -130,11 +176,9 @@ export function Message({ role, content, ts, showLabel }) {
   )
 }
 
-export function TypingIndicator({ label = 'Medi' }) {
-  const avatar = label === 'Agent' ? '👤' : '🌿'
+export function TypingIndicator({ label = 'Mediko Assistant' }) {
   return (
     <div className="typing-row">
-      <div className="typing-avatar">{avatar}</div>
       <div className="typing-bubble">
         <span className="dot" />
         <span className="dot" />

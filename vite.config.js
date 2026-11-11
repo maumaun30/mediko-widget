@@ -8,10 +8,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      'process.env.NODE_ENV':                   JSON.stringify('production'),
-      'import.meta.env.VITE_API_URL':           JSON.stringify(env.VITE_API_URL           || 'https://mediko-chatbot-production.up.railway.app'),
-      'import.meta.env.VITE_SUPABASE_URL':      JSON.stringify(env.VITE_SUPABASE_URL      || ''),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.VITE_SUPABASE_ANON_KEY || ''),
+      'process.env.NODE_ENV':         JSON.stringify('production'),
+      'import.meta.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL || 'https://mediko-chatbot-production.up.railway.app'),
     },
     build: {
       lib: {
