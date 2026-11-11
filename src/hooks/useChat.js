@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { readResumeToken } from '../prechat.js'
+import { fromServer, appendMissing, reconcileSent, shouldClearSession } from '../messages.js'
 
 const API_URL          = import.meta.env.VITE_API_URL
 const GREETING         = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
@@ -10,30 +11,8 @@ const CONFIG_REFRESH   = 5 * 60 * 1000
 const GENERIC_ERROR    = 'May nangyaring mali. Subukan ulit po.'
 const CONNECT_ERROR    = 'Hindi makakonekta sa server. I-refresh po ang page.'
 const FETCH_OPTS       = { credentials: 'omit', mode: 'cors' }
-
-// Server timestamps are UTC 'YYYY-MM-DD HH:MM:SS(.sss)' strings; make them ISO so
-// the browser does not read them as local time.
-function toIso(v) {
-  if (!v) return new Date().toISOString()
-  const s = String(v)
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) ? s.replace(' ', 'T') + 'Z' : s
-}
-
-// Legacy agent replies were stored with an "[Agent] " prefix.
-function stripLegacyPrefix(content) {
-  return typeof content === 'string' && content.startsWith('[Agent] ') ? content.slice(8) : content
-}
-
-// History/SSE rows → UI messages. agent and legacy assistant rows are staff bubbles.
-function fromServer(m) {
-  const staff = m.role === 'agent' || m.role === 'assistant'
-  return {
-    id:      m.id,
-    role:    staff ? 'agent' : 'user',
-    content: staff ? stripLegacyPrefix(m.content) : m.content,
-    ts:      toIso(m.created_at)
-  }
-}
+const RETRY_DELAYS     = [3000, 10000, 30000]   // history retry backoff; the last one repeats
+const SSE_REOPEN_DELAY = 5000
 
 function localId() {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -65,19 +44,17 @@ export function useChat() {
   const agentTypingTimer = useRef(null)
   const lastTypingSent   = useRef(0)
   const awayShown        = useRef(false)
+  const retryTimer       = useRef(null)
+  const retryAttempt     = useRef(0)
+  const sseReopenTimer   = useRef(null)
 
   const addMessage = useCallback((role, content, extra = {}) => {
     setMessages(prev => [...prev, { id: localId(), role, content, ts: new Date().toISOString(), ...extra }])
   }, [])
 
-  // Append server rows we do not have yet (by id). New rows are always the latest
-  // ones, so appending keeps order without trusting the client clock.
+  // Append server rows we do not have yet (by id).
   const mergeServerMessages = useCallback((rows) => {
-    setMessages(prev => {
-      const have = new Set(prev.map(m => m.id))
-      const fresh = rows.map(fromServer).filter(m => !have.has(m.id))
-      return fresh.length ? [...prev, ...fresh] : prev
-    })
+    setMessages(prev => appendMissing(prev, rows))
   }, [])
 
   useEffect(() => {
@@ -85,7 +62,10 @@ export function useChat() {
     initialised.current = true
     fetchConfig().then(init)
     const t = setInterval(fetchConfig, CONFIG_REFRESH)
-    return () => { clearInterval(t); unsubscribeRealtime(); clearTimeout(agentTypingTimer.current) }
+    return () => {
+      clearInterval(t); unsubscribeRealtime(); clearHistoryRetry()
+      clearTimeout(agentTypingTimer.current)
+    }
   }, [])
 
   // ── Config ───────────────────────────────────────────────
@@ -129,11 +109,17 @@ export function useChat() {
       try { sid = localStorage.getItem(STORAGE_KEY) } catch {}
     }
 
-    if (sid && await loadHistory(sid)) {
-      attachSession(sid)
-    } else {
+    const outcome = sid ? await loadHistory(sid) : 'gone'
+    if (outcome === 'gone') {
       if (sid) { try { localStorage.removeItem(STORAGE_KEY) } catch {} }
       setNeedsPrechat(true)
+    } else {
+      attachSession(sid)
+      if (outcome === 'error') {
+        // Server down or unreachable: keep the session, say so, and keep retrying.
+        setError(CONNECT_ERROR)
+        scheduleHistoryRetry(sid)
+      }
     }
     setReady(true)
   }
@@ -146,18 +132,60 @@ export function useChat() {
     } catch {}
   }
 
-  // Returns true when the session exists (history loaded, possibly empty).
-  async function loadHistory(sid) {
+  // GET history. Returns { outcome: 'ok' | 'gone' | 'error', rows }.
+  // Only a 404 means the session is gone; 5xx and network errors are 'error'.
+  async function fetchHistory(sid) {
+    let status = null
     try {
       const res = await fetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
-      if (!res.ok) return false
-      const { messages: rows = [] } = await res.json()
-      setMessages(rows.length ? rows.map(fromServer) : [])
+      status = res.status
+      if (res.ok) {
+        const { messages: rows = [] } = await res.json()
+        return { outcome: 'ok', rows }
+      }
+    } catch {}
+    return { outcome: shouldClearSession(status) ? 'gone' : 'error', rows: [] }
+  }
+
+  // First load: replace the list. Returns the outcome.
+  async function loadHistory(sid) {
+    const { outcome, rows } = await fetchHistory(sid)
+    if (outcome === 'ok') {
+      setMessages(rows.map(fromServer))
       if (!rows.length) addMessage('agent', GREETING)
-      return true
-    } catch {
-      return false
     }
+    return outcome
+  }
+
+  // Later loads (retry after an outage, SSE reconnect): merge in what is missing.
+  async function refillHistory(sid) {
+    const { outcome, rows } = await fetchHistory(sid)
+    if (sessionRef.current !== sid) return outcome
+    if (outcome === 'ok') {
+      clearHistoryRetry()
+      setError(e => (e === CONNECT_ERROR ? null : e))
+      if (rows.length) mergeServerMessages(rows)
+      else setMessages(prev => prev.length ? prev : [{ id: localId(), role: 'agent', content: GREETING, ts: new Date().toISOString() }])
+    } else if (outcome === 'gone') {
+      endSession()
+    }
+    return outcome
+  }
+
+  function scheduleHistoryRetry(sid) {
+    clearTimeout(retryTimer.current)
+    const delay = RETRY_DELAYS[Math.min(retryAttempt.current, RETRY_DELAYS.length - 1)]
+    retryAttempt.current += 1
+    retryTimer.current = setTimeout(async () => {
+      if (sessionRef.current !== sid) return
+      if (await refillHistory(sid) === 'error' && sessionRef.current === sid) scheduleHistoryRetry(sid)
+    }, delay)
+  }
+
+  function clearHistoryRetry() {
+    clearTimeout(retryTimer.current)
+    retryTimer.current = null
+    retryAttempt.current = 0
   }
 
   function attachSession(sid) {
@@ -200,14 +228,15 @@ export function useChat() {
   //   { type: 'agent_message', message: { id, role, content, created_at } }
   //   { type: 'agent_typing',  value: boolean }
   //   { type: 'connected' | 'ping' }
-  // EventSource reconnects on drop; on reconnect we re-read history to fill gaps.
+  // EventSource reconnects on a dropped connection by itself, but gives up for good
+  // on a non-200 answer (e.g. 5xx while the server restarts), so then we reopen it.
+  // Every 'connected' after the first one re-reads history to fill gaps.
 
-  function subscribeRealtime(sid) {
+  function subscribeRealtime(sid, connectedBefore = false) {
     if (realtimeRef.current) return
 
     const es = new EventSource(`${API_URL}/api/chat/listen/${sid}`)
     realtimeRef.current = es
-    let connectedBefore = false
 
     es.onmessage = (e) => {
       let evt
@@ -215,7 +244,8 @@ export function useChat() {
 
       switch (evt.type) {
         case 'connected': {
-          if (connectedBefore) refillHistory(sid)
+          // Refill on a reconnect, or right away if the first history load failed.
+          if (connectedBefore || retryTimer.current) refillHistory(sid)
           connectedBefore = true
           break
         }
@@ -235,19 +265,18 @@ export function useChat() {
       }
     }
 
-    es.onerror = () => { /* EventSource reconnects automatically */ }
-  }
-
-  async function refillHistory(sid) {
-    try {
-      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
-      if (!res.ok) return
-      const { messages: rows = [] } = await res.json()
-      mergeServerMessages(rows)
-    } catch {}
+    es.onerror = () => {
+      if (es.readyState !== EventSource.CLOSED) return   // browser is reconnecting
+      if (realtimeRef.current === es) realtimeRef.current = null
+      clearTimeout(sseReopenTimer.current)
+      sseReopenTimer.current = setTimeout(() => {
+        if (sessionRef.current === sid) subscribeRealtime(sid, true)
+      }, SSE_REOPEN_DELAY)
+    }
   }
 
   function unsubscribeRealtime() {
+    clearTimeout(sseReopenTimer.current)
     try { realtimeRef.current?.close() } catch {}
     realtimeRef.current = null
   }
@@ -296,9 +325,8 @@ export function useChat() {
         return
       }
       const { message: saved, away } = await res.json()
-      if (saved?.id) {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id, ts: toIso(saved.created_at) } : m))
-      }
+      // If a history refill already added this message, drop the temp row (no duplicate ids).
+      setMessages(prev => reconcileSent(prev, tempId, saved))
       if (away && !awayShown.current) {
         awayShown.current = true
         addMessage('agent', away)
@@ -394,6 +422,7 @@ export function useChat() {
     sessionRef.current = null
     abortRef.current?.abort()
     unsubscribeRealtime()
+    clearHistoryRetry()
     clearTimeout(agentTypingTimer.current)
     setMessages([]); setSessionId(null); setAgentTyping(false); setIsTyping(false)
     setNeedsPrechat(true)
