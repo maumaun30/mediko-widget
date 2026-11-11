@@ -269,7 +269,10 @@ export function useChat() {
       if (es.readyState !== EventSource.CLOSED) return   // browser is reconnecting
       if (realtimeRef.current === es) realtimeRef.current = null
       clearTimeout(sseReopenTimer.current)
-      sseReopenTimer.current = setTimeout(() => {
+      sseReopenTimer.current = setTimeout(async () => {
+        if (sessionRef.current !== sid) return
+        // A 404 here means the session is gone: refillHistory ends it, so do not reopen.
+        if (await refillHistory(sid) === 'gone') return
         if (sessionRef.current === sid) subscribeRealtime(sid, true)
       }, SSE_REOPEN_DELAY)
     }
