@@ -54,3 +54,6 @@ export function reconcileSent(prev, tempId, saved) {
 export function shouldClearSession(status) {
   return status === 404
 }
+
+/** Shown when the server no longer knows the session (404). Local Filipino copy, never the server's text. */
+export const SESSION_GONE = 'Natapos na po ang chat na ito. Pakisagutan ulit ang form para makapagsimula ng bagong chat.'

@@ -182,6 +182,7 @@ export function ChatWidget() {
 
           {needsPrechat ? (
             <div className="messages prechat-wrap">
+              {error && <div className="prechat-form-error" role="alert">⚠️ {error}</div>}
               <PrechatForm onStart={startChat} starting={starting} />
             </div>
           ) : (

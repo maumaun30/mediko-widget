@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { readResumeToken } from '../prechat.js'
-import { fromServer, appendMissing, reconcileSent, shouldClearSession } from '../messages.js'
+import { fromServer, appendMissing, reconcileSent, shouldClearSession, SESSION_GONE } from '../messages.js'
 
 const API_URL          = import.meta.env.VITE_API_URL
 const GREETING         = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
@@ -31,7 +31,6 @@ export function useChat() {
   const [ready,        setReady]        = useState(false)
   const [online,       setOnline]       = useState(null)
   const [nextOpenAt,   setNextOpenAt]   = useState(null)
-  const [aiEnabled,    setAiEnabled]    = useState(false)
   const [error,        setError]        = useState(null)
   const [autoOpen,     setAutoOpen]     = useState(false)
   const [starting,     setStarting]     = useState(false)
@@ -77,7 +76,6 @@ export function useChat() {
       const cfg = await res.json()
       const ai = cfg.aiEnabled === true
       aiRef.current = ai
-      setAiEnabled(ai)
       setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
       setNextOpenAt(cfg.nextOpenAt || null)
     } catch {}
@@ -319,7 +317,7 @@ export function useChat() {
       if (res.status === 404) {
         setMessages(prev => prev.filter(m => m.id !== tempId))
         endSession()
-        setError(await readError(res, CONNECT_ERROR))
+        setError(SESSION_GONE)   // local Filipino copy, not the server's English text
         return
       }
       if (!res.ok) {
@@ -438,7 +436,7 @@ export function useChat() {
 
   return {
     messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
-    aiEnabled, error, sessionId, autoOpen, starting,
+    error, sessionId, autoOpen, starting,
     startChat, sendMessage, notifyTyping, resetSession
   }
 }
