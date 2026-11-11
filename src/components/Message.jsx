@@ -150,6 +150,13 @@ function ProductCard({ label, url }) {
   )
 }
 
+export const STAFF_LABEL = 'Mediko Support'
+
+// agent replies and legacy AI (assistant) answers both render as a "Mediko Support" bubble.
+export function isStaffRole(role) {
+  return role === 'agent' || role === 'assistant'
+}
+
 export function Message({ role, content, ts, showLabel }) {
   if (!content) return null
 
@@ -157,14 +164,15 @@ export function Message({ role, content, ts, showLabel }) {
   if (!parsed) return null
 
   const { elements, productLinks } = parsed
+  const staff = isStaffRole(role)
 
   return (
-    <div className={`msg-row ${role}`}>
-      {role === 'assistant' && showLabel && (
-        <div className="bot-label">Mediko Assistant</div>
+    <div className={`msg-row ${staff ? 'assistant' : 'user'}`}>
+      {staff && showLabel && (
+        <div className="bot-label">{STAFF_LABEL}</div>
       )}
       <div className="bubble">{elements}</div>
-      {productLinks.length > 0 && role === 'assistant' && (
+      {productLinks.length > 0 && staff && (
         <div className="product-cards">
           {productLinks.map((p, i) => (
             <ProductCard key={i} label={p.label} url={p.url} />
@@ -176,7 +184,7 @@ export function Message({ role, content, ts, showLabel }) {
   )
 }
 
-export function TypingIndicator({ label = 'Mediko Assistant' }) {
+export function TypingIndicator({ label = STAFF_LABEL }) {
   return (
     <div className="typing-row">
       <div className="typing-bubble">

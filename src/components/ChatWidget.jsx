@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
-import { Message, TypingIndicator } from './Message.jsx'
+import { validatePrechat, formatNextOpen } from '../prechat.js'
+import { Message, TypingIndicator, isStaffRole, STAFF_LABEL } from './Message.jsx'
 
 const ChatIcon  = () => <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
 const CloseIcon = () => <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
@@ -18,6 +19,87 @@ function TooltipPopup({ onDismiss }) {
   )
 }
 
+function statusLine(online, nextOpenAt) {
+  if (online === true) return 'Online · karaniwang sumasagot sa loob ng ilang minuto'
+  if (online === false) {
+    const when = formatNextOpen(nextOpenAt)
+    return when ? `Offline · babalik ${when}` : 'Offline'
+  }
+  return ''
+}
+
+// Logged-in Shopify customer passed from the theme: window.MEDIKO_CUSTOMER = { name, email, phone }
+function themeCustomer() {
+  try {
+    const c = typeof window !== 'undefined' ? window.MEDIKO_CUSTOMER : null
+    if (!c || typeof c !== 'object') return { name: '', email: '', phone: '' }
+    return { name: String(c.name || ''), email: String(c.email || ''), phone: String(c.phone || '') }
+  } catch {
+    return { name: '', email: '', phone: '' }
+  }
+}
+
+function PrechatForm({ onStart, starting }) {
+  const [form,      setForm]      = useState(themeCustomer)
+  const [errors,    setErrors]    = useState({})
+  const [formError, setFormError] = useState(null)
+
+  function update(field) {
+    return e => {
+      const v = e.target.value
+      setForm(f => ({ ...f, [field]: v }))
+      if (errors[field]) setErrors(er => ({ ...er, [field]: undefined }))
+    }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (starting) return
+    setFormError(null)
+    const r = validatePrechat(form)
+    if (!r.ok) { setErrors(r.errors); return }
+    setErrors({})
+    const res = await onStart(r.value)
+    if (!res?.ok && res?.error) setFormError(res.error)
+  }
+
+  return (
+    <form className="prechat" onSubmit={submit} noValidate>
+      <p className="prechat-intro">Bago tayo magsimula, pakilagay po ang inyong detalye:</p>
+
+      <label className="prechat-field">
+        <span className="prechat-label">Pangalan *</span>
+        <input className={`prechat-input${errors.name ? ' invalid' : ''}`} type="text" autoComplete="name"
+          maxLength={100} value={form.name} onChange={update('name')} aria-invalid={!!errors.name} />
+        {errors.name && <span className="prechat-error">{errors.name}</span>}
+      </label>
+
+      <label className="prechat-field">
+        <span className="prechat-label">Email *</span>
+        <input className={`prechat-input${errors.email ? ' invalid' : ''}`} type="email" autoComplete="email"
+          value={form.email} onChange={update('email')} aria-invalid={!!errors.email} />
+        {errors.email && <span className="prechat-error">{errors.email}</span>}
+      </label>
+
+      <label className="prechat-field">
+        <span className="prechat-label">Mobile number *</span>
+        <input className={`prechat-input${errors.phone ? ' invalid' : ''}`} type="tel" autoComplete="tel"
+          inputMode="tel" placeholder="09XXXXXXXXX" value={form.phone} onChange={update('phone')}
+          aria-invalid={!!errors.phone} />
+        {errors.phone && <span className="prechat-error">{errors.phone}</span>}
+      </label>
+
+      {formError && <div className="prechat-form-error" role="alert">⚠️ {formError}</div>}
+
+      <button className="prechat-cta" type="submit" disabled={starting}>
+        {starting ? 'Sandali lang po…' : 'Simulan ang chat'}
+      </button>
+
+      <p className="prechat-privacy">Gagamitin lang po namin ang inyong detalye para sagutin ang inyong mensahe.</p>
+    </form>
+  )
+}
+
 export function ChatWidget() {
   const [open,        setOpen]        = useState(false)
   const [input,       setInput]       = useState('')
@@ -28,16 +110,23 @@ export function ChatWidget() {
   const prevCount      = useRef(0)
 
   const {
-    messages, isTyping, agentTyping, mode, error,
-    quickReplies, aiEnabled,
-    sendMessage, resetSession, rateMessage
+    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
+    error, sessionId, autoOpen, starting,
+    startChat, sendMessage, notifyTyping, resetSession
   } = useChat()
 
   useEffect(() => { const t = setTimeout(() => setShowTooltip(true), 2500); return () => clearTimeout(t) }, [])
 
+  // Resume link (?mdk_chat=…) reopens the chat automatically.
+  useEffect(() => { if (autoOpen) setOpen(true) }, [autoOpen])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    if (!open && messages.length > prevCount.current) setUnread(n => n + (messages.length - prevCount.current))
+    // Count only staff replies that arrive after the initial load.
+    if (ready && !open && messages.length > prevCount.current) {
+      const fresh = messages.slice(prevCount.current).filter(m => isStaffRole(m.role)).length
+      if (fresh) setUnread(n => n + fresh)
+    }
     prevCount.current = messages.length
   }, [messages, isTyping, agentTyping])
 
@@ -45,9 +134,11 @@ export function ChatWidget() {
     if (open) { setUnread(0); setShowTooltip(false); setTimeout(() => inputRef.current?.focus(), 200) }
   }, [open])
 
+  const canType = !!sessionId && !isTyping
+
   function handleSend() {
     const text = input.trim()
-    if (!text || isTyping) return
+    if (!text || !canType) return
     setInput(''); if (inputRef.current) inputRef.current.style.height = ''
     sendMessage(text)
   }
@@ -56,16 +147,14 @@ export function ChatWidget() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
 
-  function autoResize(e) {
+  function handleChange(e) {
+    setInput(e.target.value)
     e.target.style.height = 'auto'
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
+    if (e.target.value.trim()) notifyTyping()
   }
 
-  function handleQuickReply(msg) { setOpen(true); setTimeout(() => sendMessage(msg), 100) }
-
-  const aiOff = !aiEnabled && mode === 'ai'
-
-  const showQuickReplies = messages.length <= 1 && mode === 'ai' && !aiOff
+  const status = statusLine(online, nextOpenAt)
 
   return (
     <>
@@ -76,77 +165,69 @@ export function ChatWidget() {
           {/* Header */}
           <div className="chat-header">
             <div className="header-text">
-              <div className="header-name">Mediko Assistant</div>
+              <div className="header-name">{STAFF_LABEL}</div>
+              {status && (
+                <div className={`header-status ${online ? 'online' : 'offline'}`}>
+                  <span className="status-dot" aria-hidden="true" />{status}
+                </div>
+              )}
             </div>
             <div className="header-btns">
-              <button className="icon-btn" onClick={resetSession} title="Bagong usapan" aria-label="Bagong usapan"><ResetIcon /></button>
+              {sessionId && (
+                <button className="icon-btn" onClick={resetSession} title="Bagong usapan" aria-label="Bagong usapan"><ResetIcon /></button>
+              )}
               <button className="icon-btn" onClick={() => setOpen(false)} title="Isara" aria-label="Isara"><CloseIcon /></button>
             </div>
           </div>
 
-          {/* Mode banners */}
-          {mode === 'handoff' && (
-            <div className="mode-banner handoff">⏳ Sandali lang po — ikinokonekta kayo sa aming team.</div>
-          )}
-          {mode === 'agent' && (
-            <div className="mode-banner agent">✅ Naka-konekta na kayo sa aming support team.</div>
-          )}
-
-          {/* Messages */}
-          <div className="messages">
-            {messages.map((m, idx) => (
-              <Message
-                key={m.id}
-                id={m.id}
-                role={m.role}
-                content={m.content}
-                ts={m.ts}
-                showLabel={m.role === 'assistant' && (idx === 0 || messages[idx-1]?.role !== 'assistant')}
-                rateable={m.rateable}
-                rated={m.rated}
-                onRate={rateMessage}
-              />
-            ))}
-            {isTyping     && <TypingIndicator />}
-            {agentTyping  && <TypingIndicator label="Agent" />}
-            {error && (
-              <div className="msg-row assistant">
-                <div className="bubble" style={{ background: '#fff0f0', borderColor: '#fecaca', color: '#991b1b' }}>
-                  ⚠️ {error}
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Quick replies */}
-          {showQuickReplies && quickReplies.length > 0 && (
-            <div className="quick-replies">
-              {quickReplies.map(q => (
-                <button key={q.label} className="quick-reply" onClick={() => handleQuickReply(q.message)}>
-                  {q.label}
-                </button>
-              ))}
+          {needsPrechat ? (
+            <div className="messages prechat-wrap">
+              <PrechatForm onStart={startChat} starting={starting} />
             </div>
-          )}
+          ) : (
+            <>
+              {/* Messages */}
+              <div className="messages">
+                {messages.map((m, idx) => (
+                  <Message
+                    key={m.id}
+                    role={m.role}
+                    content={m.content}
+                    ts={m.ts}
+                    showLabel={isStaffRole(m.role) && (idx === 0 || !isStaffRole(messages[idx - 1]?.role))}
+                  />
+                ))}
+                {isTyping    && <TypingIndicator />}
+                {agentTyping && <TypingIndicator />}
+                {error && (
+                  <div className="msg-row assistant">
+                    <div className="bubble" style={{ background: '#fff0f0', borderColor: '#fecaca', color: '#991b1b' }}>
+                      ⚠️ {error}
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
 
-          {/* Input */}
-          <div className="input-area">
-            <textarea
-              ref={inputRef}
-              className="msg-input"
-              value={input}
-              onChange={e => { setInput(e.target.value); autoResize(e) }}
-              onKeyDown={handleKey}
-              placeholder={mode === 'agent' ? 'Mag-type ng mensahe...' : 'I-type ang inyong tanong dito...'}
-              rows={1}
-              disabled={isTyping}
-              aria-label="Message input"
-            />
-            <button className="send-btn" onClick={handleSend} disabled={!input.trim() || isTyping} aria-label="Ipadala">
-              <SendIcon />
-            </button>
-          </div>
+              {/* Input */}
+              <div className="input-area">
+                <textarea
+                  ref={inputRef}
+                  className="msg-input"
+                  value={input}
+                  onChange={handleChange}
+                  onKeyDown={handleKey}
+                  placeholder="I-type ang inyong mensahe..."
+                  rows={1}
+                  disabled={!canType}
+                  aria-label="Message input"
+                />
+                <button className="send-btn" onClick={handleSend} disabled={!input.trim() || !canType} aria-label="Ipadala">
+                  <SendIcon />
+                </button>
+              </div>
+            </>
+          )}
 
           <div className="chat-footer">
             Powered by <a href="https://store.mediko.ph" target="_blank" rel="noopener">Mediko.ph</a>

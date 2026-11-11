@@ -1,151 +1,250 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { readResumeToken } from '../prechat.js'
 
 const API_URL          = import.meta.env.VITE_API_URL
 const GREETING         = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY      = 'mediko_session_id'
+const RESUME_PARAM     = 'mdk_chat'
+const TYPING_THROTTLE  = 3000
+const CONFIG_REFRESH   = 5 * 60 * 1000
+const GENERIC_ERROR    = 'May nangyaring mali. Subukan ulit po.'
+const CONNECT_ERROR    = 'Hindi makakonekta sa server. I-refresh po ang page.'
+const FETCH_OPTS       = { credentials: 'omit', mode: 'cors' }
+
+// Server timestamps are UTC 'YYYY-MM-DD HH:MM:SS(.sss)' strings; make them ISO so
+// the browser does not read them as local time.
+function toIso(v) {
+  if (!v) return new Date().toISOString()
+  const s = String(v)
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) ? s.replace(' ', 'T') + 'Z' : s
+}
+
+// Legacy agent replies were stored with an "[Agent] " prefix.
+function stripLegacyPrefix(content) {
+  return typeof content === 'string' && content.startsWith('[Agent] ') ? content.slice(8) : content
+}
+
+// History/SSE rows → UI messages. agent and legacy assistant rows are staff bubbles.
+function fromServer(m) {
+  const staff = m.role === 'agent' || m.role === 'assistant'
+  return {
+    id:      m.id,
+    role:    staff ? 'agent' : 'user',
+    content: staff ? stripLegacyPrefix(m.content) : m.content,
+    ts:      toIso(m.created_at)
+  }
+}
+
+function localId() {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+async function readError(res, fallback) {
+  try { const body = await res.json(); return body?.error || fallback } catch { return fallback }
+}
 
 export function useChat() {
-  const [messages,      setMessages]      = useState([])
-  const [isTyping,      setIsTyping]      = useState(false)
-  const [agentTyping,   setAgentTyping]   = useState(false)
-  const [sessionId,     setSessionId]     = useState(null)
-  const [mode,          setMode]          = useState('ai')
-  const [error,         setError]         = useState(null)
-  const [quickReplies,  setQuickReplies]  = useState([])
-  const [aiEnabled,     setAiEnabled]     = useState(true)
+  const [messages,     setMessages]     = useState([])
+  const [isTyping,     setIsTyping]     = useState(false)   // AI streaming only
+  const [agentTyping,  setAgentTyping]  = useState(false)
+  const [sessionId,    setSessionId]    = useState(null)
+  const [needsPrechat, setNeedsPrechat] = useState(false)
+  const [ready,        setReady]        = useState(false)
+  const [online,       setOnline]       = useState(null)
+  const [nextOpenAt,   setNextOpenAt]   = useState(null)
+  const [aiEnabled,    setAiEnabled]    = useState(false)
+  const [error,        setError]        = useState(null)
+  const [autoOpen,     setAutoOpen]     = useState(false)
+  const [starting,     setStarting]     = useState(false)
 
-  const sessionRef  = useRef(null)
-  const abortRef    = useRef(null)
-  const realtimeRef = useRef(null)
-  const initialised = useRef(false)
+  const sessionRef       = useRef(null)
+  const aiRef            = useRef(false)
+  const abortRef         = useRef(null)
+  const realtimeRef      = useRef(null)
+  const initialised      = useRef(false)
   const agentTypingTimer = useRef(null)
+  const lastTypingSent   = useRef(0)
+  const awayShown        = useRef(false)
 
   const addMessage = useCallback((role, content, extra = {}) => {
-    setMessages(prev => [...prev, {
-      id:      `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      role, content, ts: new Date().toISOString(), ...extra
-    }])
+    setMessages(prev => [...prev, { id: localId(), role, content, ts: new Date().toISOString(), ...extra }])
+  }, [])
+
+  // Append server rows we do not have yet (by id). New rows are always the latest
+  // ones, so appending keeps order without trusting the client clock.
+  const mergeServerMessages = useCallback((rows) => {
+    setMessages(prev => {
+      const have = new Set(prev.map(m => m.id))
+      const fresh = rows.map(fromServer).filter(m => !have.has(m.id))
+      return fresh.length ? [...prev, ...fresh] : prev
+    })
   }, [])
 
   useEffect(() => {
     if (initialised.current) return
     initialised.current = true
-    fetchConfig()
-    fetchQuickReplies()
-    restoreSession()
+    fetchConfig().then(init)
+    const t = setInterval(fetchConfig, CONFIG_REFRESH)
+    return () => { clearInterval(t); unsubscribeRealtime(); clearTimeout(agentTypingTimer.current) }
   }, [])
 
-  // ── Config (AI kill-switch, etc.) ────────────────────────
+  // ── Config ───────────────────────────────────────────────
 
   async function fetchConfig() {
     try {
-      const res = await fetch(`${API_URL}/api/chat/config`, { credentials: 'omit', mode: 'cors' })
+      const res = await fetch(`${API_URL}/api/chat/config`, FETCH_OPTS)
       if (!res.ok) return
       const cfg = await res.json()
-      if (typeof cfg.aiEnabled === 'boolean') setAiEnabled(cfg.aiEnabled)
+      const ai = cfg.aiEnabled === true
+      aiRef.current = ai
+      setAiEnabled(ai)
+      setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
+      setNextOpenAt(cfg.nextOpenAt || null)
     } catch {}
   }
 
-  // ── Quick replies ────────────────────────────────────────
+  // ── Session bootstrap: resume link → localStorage → pre-chat form ──
 
-  async function fetchQuickReplies() {
-    try {
-      const res = await fetch(`${API_URL}/api/quick-replies`, { credentials: 'omit', mode: 'cors' })
-      if (!res.ok) return
-      const { quickReplies } = await res.json()
-      setQuickReplies(quickReplies.map(q => ({ label: q.label, message: q.message })))
-    } catch {}
-  }
+  async function init() {
+    let sid = null
 
-  // ── Session restore ──────────────────────────────────────
-
-  async function restoreSession() {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (!stored) { addMessage('assistant', GREETING); return }
-    try {
-      const res = await fetch(`${API_URL}/api/chat/history/${stored}`, { credentials: 'omit', mode: 'cors' })
-      if (!res.ok) { localStorage.removeItem(STORAGE_KEY); addMessage('assistant', GREETING); return }
-      const { messages: history } = await res.json()
-      sessionRef.current = stored
-      setSessionId(stored)
-      if (history.length) {
-        setMessages(history.map(m => ({ id: m.id, role: m.role, content: m.content, ts: m.created_at })))
-      } else { addMessage('assistant', GREETING) }
+    const token = readResumeToken(location.search)
+    if (token) {
       try {
-        const modeRes = await fetch(`${API_URL}/api/chat/mode/${stored}`, { credentials: 'omit', mode: 'cors' })
-        if (modeRes.ok) {
-          const { mode: cur } = await modeRes.json()
-          if (cur === 'agent' || cur === 'handoff') { setMode(cur); subscribeRealtime(stored) }
+        const res = await fetch(`${API_URL}/api/chat/resume?t=${encodeURIComponent(token)}`, FETCH_OPTS)
+        if (res.ok) {
+          const body = await res.json()
+          if (body?.sessionId) {
+            sid = body.sessionId
+            try { localStorage.setItem(STORAGE_KEY, sid) } catch {}
+            setAutoOpen(true)
+            removeResumeParam()
+          }
         }
+        // 410 (expired/invalid): ignore and fall back to the stored session.
       } catch {}
-    } catch { addMessage('assistant', GREETING) }
+    }
+
+    if (!sid) {
+      try { sid = localStorage.getItem(STORAGE_KEY) } catch {}
+    }
+
+    if (sid && await loadHistory(sid)) {
+      attachSession(sid)
+    } else {
+      if (sid) { try { localStorage.removeItem(STORAGE_KEY) } catch {} }
+      setNeedsPrechat(true)
+    }
+    setReady(true)
   }
 
-  // ── Session creation ──────────────────────────────────────
+  function removeResumeParam() {
+    try {
+      const url = new URL(location.href)
+      url.searchParams.delete(RESUME_PARAM)
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash)
+    } catch {}
+  }
 
-  async function createSession() {
+  // Returns true when the session exists (history loaded, possibly empty).
+  async function loadHistory(sid) {
+    try {
+      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
+      if (!res.ok) return false
+      const { messages: rows = [] } = await res.json()
+      setMessages(rows.length ? rows.map(fromServer) : [])
+      if (!rows.length) addMessage('agent', GREETING)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function attachSession(sid) {
+    sessionRef.current = sid
+    setSessionId(sid)
+    setNeedsPrechat(false)
+    subscribeRealtime(sid)
+  }
+
+  // ── Pre-chat → POST /api/chat/session ────────────────────
+
+  const startChat = useCallback(async (value) => {
+    if (starting) return { ok: false }
+    setStarting(true)
+    setError(null)
     try {
       const res = await fetch(`${API_URL}/api/chat/session`, {
-        method: 'POST', credentials: 'omit', mode: 'cors',
+        ...FETCH_OPTS, method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: { url: location.href } })
+        body: JSON.stringify({ ...value, metadata: { url: location.href } })
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        const msg = res.status === 400 ? await readError(res, GENERIC_ERROR) : CONNECT_ERROR
+        return { ok: false, error: msg }
+      }
       const { sessionId: id } = await res.json()
-      localStorage.setItem(STORAGE_KEY, id)
-      sessionRef.current = id; setSessionId(id)
-      return id
-    } catch { setError('Hindi makakonekta sa server. I-refresh po ang page.'); return null }
-  }
+      try { localStorage.setItem(STORAGE_KEY, id) } catch {}
+      setMessages([])
+      addMessage('agent', GREETING)
+      attachSession(id)
+      return { ok: true }
+    } catch {
+      return { ok: false, error: CONNECT_ERROR }
+    } finally {
+      setStarting(false)
+    }
+  }, [starting, addMessage])
 
-  // ── Realtime (agent push) via the API's SSE /listen stream ──
-  // Replaces the old Supabase Realtime WebSocket. The server pushes:
-  //   { type: 'agent_message', text }  — agent reply
-  //   { type: 'agent_typing', ... }    — agent typing indicator
-  //   { type: 'mode_changed',  mode }  — handed back to AI (mode='ai') or taken over
-  //   { type: 'connected' | 'ping' }   — lifecycle/keepalive (ignored)
-  // EventSource is a native browser API and auto-reconnects on drop.
+  // ── Realtime push via the API's SSE /listen stream (always open with a session) ──
+  //   { type: 'agent_message', message: { id, role, content, created_at } }
+  //   { type: 'agent_typing',  value: boolean }
+  //   { type: 'connected' | 'ping' }
+  // EventSource reconnects on drop; on reconnect we re-read history to fill gaps.
 
   function subscribeRealtime(sid) {
     if (realtimeRef.current) return
 
     const es = new EventSource(`${API_URL}/api/chat/listen/${sid}`)
     realtimeRef.current = es
+    let connectedBefore = false
 
     es.onmessage = (e) => {
       let evt
       try { evt = JSON.parse(e.data) } catch { return }
 
       switch (evt.type) {
+        case 'connected': {
+          if (connectedBefore) refillHistory(sid)
+          connectedBefore = true
+          break
+        }
         case 'agent_message': {
           setAgentTyping(false)
           clearTimeout(agentTypingTimer.current)
-          const raw     = evt.text || ''
-          const content = raw.startsWith('[Agent] ') ? raw.slice(8) : raw
-          addMessage('assistant', content)
+          if (evt.message?.content) mergeServerMessages([{ ...evt.message, role: 'agent' }])
           break
         }
         case 'agent_typing': {
-          setAgentTyping(true)
           clearTimeout(agentTypingTimer.current)
-          agentTypingTimer.current = setTimeout(() => setAgentTyping(false), 8000)
+          setAgentTyping(!!evt.value)
+          if (evt.value) agentTypingTimer.current = setTimeout(() => setAgentTyping(false), 8000)
           break
         }
-        case 'mode_changed': {
-          if (evt.mode === 'ai') {
-            setMode('ai')
-            setAgentTyping(false)
-            addMessage('assistant', 'Naibalik na po kayo sa aming Mediko Assistant. Paano ko pa kayo matutulungan?')
-          } else if (evt.mode === 'agent') {
-            setMode('agent')
-          }
-          break
-        }
-        // 'connected', 'ping' — no-op
+        // 'ping' — no-op
       }
     }
 
     es.onerror = () => { /* EventSource reconnects automatically */ }
+  }
+
+  async function refillHistory(sid) {
+    try {
+      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
+      if (!res.ok) return
+      const { messages: rows = [] } = await res.json()
+      mergeServerMessages(rows)
+    } catch {}
   }
 
   function unsubscribeRealtime() {
@@ -153,31 +252,68 @@ export function useChat() {
     realtimeRef.current = null
   }
 
-  // ── Rating ────────────────────────────────────────────────
+  // ── Customer typing → POST /api/chat/typing (at most one per 3 s) ──
 
-  const rateMessage = useCallback(async (messageId, rating) => {
+  const notifyTyping = useCallback(() => {
     const sid = sessionRef.current
     if (!sid) return
-    try {
-      await fetch(`${API_URL}/api/analytics/rate`, {
-        method: 'POST', credentials: 'omit', mode: 'cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sid, messageId, rating })
-      })
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rated: rating } : m))
-    } catch {}
+    const now = Date.now()
+    if (now - lastTypingSent.current < TYPING_THROTTLE) return
+    lastTypingSent.current = now
+    fetch(`${API_URL}/api/chat/typing`, {
+      ...FETCH_OPTS, method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid })
+    }).catch(() => {})
   }, [])
 
-  // ── Send message ──────────────────────────────────────────
+  // ── Send message ─────────────────────────────────────────
 
   const sendMessage = useCallback(async (text) => {
-    if (!text.trim() || isTyping) return
+    const sid = sessionRef.current
+    if (!text.trim() || isTyping || !sid) return
     setError(null)
+    if (aiRef.current === true) return sendToAi(sid, text)
+
+    // Human-only path: POST /api/chat/message
+    const tempId = localId()
+    setMessages(prev => [...prev, { id: tempId, role: 'user', content: text, ts: new Date().toISOString() }])
+    try {
+      const res = await fetch(`${API_URL}/api/chat/message`, {
+        ...FETCH_OPTS, method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sid, message: text })
+      })
+      if (res.status === 404) {
+        setMessages(prev => prev.filter(m => m.id !== tempId))
+        endSession()
+        setError(await readError(res, CONNECT_ERROR))
+        return
+      }
+      if (!res.ok) {
+        setMessages(prev => prev.filter(m => m.id !== tempId))
+        setError(await readError(res, GENERIC_ERROR))
+        return
+      }
+      const { message: saved, away } = await res.json()
+      if (saved?.id) {
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: saved.id, ts: toIso(saved.created_at) } : m))
+      }
+      if (away && !awayShown.current) {
+        awayShown.current = true
+        addMessage('agent', away)
+      }
+    } catch {
+      setMessages(prev => prev.filter(m => m.id !== tempId))
+      setError(GENERIC_ERROR)
+    }
+  }, [isTyping, addMessage])
+
+  // ── AI streaming path (only when config.aiEnabled === true) ──
+
+  async function sendToAi(sid, text) {
     addMessage('user', text)
     setIsTyping(true)
-
-    let sid = sessionRef.current
-    if (!sid) { sid = await createSession(); if (!sid) { setIsTyping(false); return } }
 
     abortRef.current?.abort()
     abortRef.current = new AbortController()
@@ -191,9 +327,39 @@ export function useChat() {
       }
     }
 
+    function setSlot(content) {
+      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content } : m))
+    }
+
+    function processLine(line) {
+      if (!line.startsWith('data: ')) return
+      let evt; try { evt = JSON.parse(line.slice(6)) } catch { return }
+      switch (evt.type) {
+        case 'chunk':
+          ensureSlot(); fullContent += evt.text
+          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: m.content + evt.text } : m))
+          break
+        case 'done':
+          ensureSlot(); setIsTyping(false)
+          break
+        case 'handoff':
+        case 'agent_mode':
+        case 'away':
+          ensureSlot(); setIsTyping(false); setSlot(evt.message)
+          break
+        case 'agent_ack':
+          setIsTyping(false); break
+        case 'error':
+          setIsTyping(false)
+          if (slotAdded) setMessages(prev => prev.filter(m => m.id !== assistantId))
+          setError(evt.message)
+          break
+      }
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/chat`, {
-        method: 'POST', credentials: 'omit', mode: 'cors',
+        ...FETCH_OPTS, method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, sessionId: sid }),
         signal: abortRef.current.signal
@@ -217,62 +383,30 @@ export function useChat() {
       if (err.name === 'AbortError') return
       setIsTyping(false)
       if (slotAdded && !fullContent) setMessages(prev => prev.filter(m => m.id !== assistantId))
-      setError('May nangyaring mali. Subukan ulit po.')
+      setError(GENERIC_ERROR)
     }
+  }
 
-    function processLine(line) {
-      if (!line.startsWith('data: ')) return
-      let evt; try { evt = JSON.parse(line.slice(6)) } catch { return }
-      switch (evt.type) {
-        case 'chunk':
-          ensureSlot(); fullContent += evt.text
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: m.content + evt.text } : m))
-          break
-        case 'done':
-          ensureSlot(); setIsTyping(false)
-          // Mark last assistant message as rateable
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, rateable: true } : m))
-          break
-        case 'handoff':
-          ensureSlot(); setMode('handoff'); setIsTyping(false)
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: evt.message } : m))
-          subscribeRealtime(sid)
-          break
-        case 'agent_mode':
-          ensureSlot(); setMode('agent'); setIsTyping(false)
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: evt.message } : m))
-          subscribeRealtime(sid)
-          break
-        case 'away':
-          ensureSlot(); setIsTyping(false)
-          setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: evt.message } : m))
-          break
-        case 'agent_ack':
-          setIsTyping(false); break
-        case 'error':
-          setIsTyping(false)
-          if (slotAdded) setMessages(prev => prev.filter(m => m.id !== assistantId))
-          setError(evt.message)
-          break
-      }
-    }
-  }, [isTyping, addMessage])
+  // ── Reset ────────────────────────────────────────────────
 
-  // ── Reset ─────────────────────────────────────────────────
-
-  function resetSession() {
-    localStorage.removeItem(STORAGE_KEY)
+  function endSession() {
+    try { localStorage.removeItem(STORAGE_KEY) } catch {}
     sessionRef.current = null
     abortRef.current?.abort()
     unsubscribeRealtime()
-    setMessages([]); setMode('ai'); setError(null); setSessionId(null)
-    setAgentTyping(false)
-    setTimeout(() => addMessage('assistant', GREETING), 50)
+    clearTimeout(agentTypingTimer.current)
+    setMessages([]); setSessionId(null); setAgentTyping(false); setIsTyping(false)
+    setNeedsPrechat(true)
+  }
+
+  function resetSession() {
+    endSession()
+    setError(null)
   }
 
   return {
-    messages, isTyping, agentTyping, mode, error,
-    sessionId, quickReplies, aiEnabled,
-    sendMessage, resetSession, rateMessage
+    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
+    aiEnabled, error, sessionId, autoOpen, starting,
+    startChat, sendMessage, notifyTyping, resetSession
   }
 }
