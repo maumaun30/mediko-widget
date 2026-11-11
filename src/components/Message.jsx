@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { tokenizeLinks } from '../linkify.js'
 
 const API_URL = import.meta.env.VITE_API_URL
 
@@ -38,55 +39,35 @@ function formatTime(ts) {
 }
 
 /**
- * Parse [label](url) markdown links and bare URLs.
- * Product links (store.mediko.ph/products/...) are rendered as cards.
- * Other links render as inline anchor tags.
- * Bare URLs are silently dropped (they're duplicates of markdown links).
+ * Turn message text into elements. http(s) links (markdown or bare) become
+ * anchors; markdown links to /products/ pages are also collected so staff
+ * bubbles can show product cards. Any other scheme stays plain text.
  */
 function renderContent(text) {
   if (!text) return null
 
-  const TOKEN = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)|https?:\/\/[^\s)]+/g
   const productLinks = []
   const elements = []
-  let lastIndex = 0
-  let match
   let key = 0
 
-  // First pass — extract product links separately, render rest inline
-  while ((match = TOKEN.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      pushText(text.slice(lastIndex, match.index), key++, elements)
+  for (const tok of tokenizeLinks(text)) {
+    if (tok.type === 'text') {
+      pushText(tok.text, key++, elements)
+    } else if (tok.type === 'product') {
+      productLinks.push({ label: tok.label, url: tok.href })
+      elements.push(
+        <span key={key++} style={{ color: 'var(--mdk-primary)', fontWeight: 500 }}>
+          {tok.label}
+        </span>
+      )
+    } else {
+      elements.push(
+        <a key={key++} href={tok.href} target="_blank" rel="noopener noreferrer"
+           style={{ fontWeight: 500, textDecoration: 'underline', color: 'inherit', wordBreak: 'break-all' }}>
+          {tok.label}
+        </a>
+      )
     }
-
-    if (match[1]) {
-      const url   = match[2]
-      const label = match[1]
-      if (url.includes('/products/')) {
-        // Product link — collect for card rendering below the text
-        productLinks.push({ label, url })
-        // Still show inline text reference but subtly
-        elements.push(
-          <span key={key++} style={{ color: 'var(--mdk-primary)', fontWeight: 500 }}>
-            {label}
-          </span>
-        )
-      } else {
-        elements.push(
-          <a key={key++} href={url} target="_blank" rel="noopener noreferrer"
-             style={{ fontWeight: 500, textDecoration: 'underline', color: 'inherit' }}>
-            {label}
-          </a>
-        )
-      }
-    }
-    // bare URLs silently dropped
-
-    lastIndex = match.index + match[0].length
-  }
-
-  if (lastIndex < text.length) {
-    pushText(text.slice(lastIndex), key++, elements)
   }
 
   return { elements, productLinks }
