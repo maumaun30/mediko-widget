@@ -5,9 +5,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^(\+639|09)\d{9}$/
 
 export const PRECHAT_ERRORS = {
-  name:  'Pakilagay po ang inyong pangalan.',
-  email: 'Pakilagay po ang tamang email.',
-  phone: 'Pakilagay po ang tamang mobile number (09XXXXXXXXX).'
+  name:  'Please enter your name.',
+  email: 'Please enter a valid email.',
+  phone: 'Please enter a valid mobile number (09XXXXXXXXX).'
 }
 
 /**
@@ -39,17 +39,3 @@ export function readResumeToken(search) {
   }
 }
 
-const DAYS = ['Lin', 'Lun', 'Mar', 'Miy', 'Huw', 'Biy', 'Sab']
-const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000 // Asia/Manila is UTC+8 with no DST
-
-/** Format an ISO instant in Asia/Manila as e.g. "Lun 8:00 AM". '' when missing/invalid. */
-export function formatNextOpen(iso) {
-  if (!iso) return ''
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return ''
-  const d = new Date(t + MANILA_OFFSET_MS)
-  const h24 = d.getUTCHours()
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
-  const mm  = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${DAYS[d.getUTCDay()]} ${h12}:${mm} ${h24 < 12 ? 'AM' : 'PM'}`
-}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
-import { validatePrechat, formatNextOpen } from '../prechat.js'
+import { validatePrechat } from '../prechat.js'
+import { formatSchedule } from '../schedule.js'
 import { Message, TypingIndicator, isStaffRole, STAFF_LABEL, PreviewCard } from './Message.jsx'
 import { storeProductLink } from '../product.js'
 import { useStorePreview } from '../hooks/useStorePreview.js'
@@ -21,14 +22,11 @@ function TooltipPopup({ onDismiss }) {
   )
 }
 
-function statusLine(online, nextOpenAt, serverDown) {
-  if (serverDown) return 'Hindi makakonekta · sinusubukang muli…'
-  if (online === true) return 'Online · karaniwang sumasagot sa loob ng ilang minuto'
-  if (online === false) {
-    const when = formatNextOpen(nextOpenAt)
-    return when ? `Offline · babalik ${when}` : 'Offline'
-  }
-  return ''
+// Header shows only Online/Offline; office hours live in the 🕗 popover.
+function statusLine(online, serverDown) {
+  if (serverDown || online === false) return 'Offline'
+  if (online === true) return 'Online'
+  return null
 }
 
 // Logged-in Shopify customer passed from the theme: window.MEDIKO_CUSTOMER = { name, email, phone }
@@ -68,10 +66,10 @@ function PrechatForm({ onStart, starting }) {
 
   return (
     <form className="prechat" onSubmit={submit} noValidate>
-      <p className="prechat-intro">Bago tayo magsimula, pakilagay po ang inyong detalye:</p>
+      <p className="prechat-intro">Enter your details to start.</p>
 
       <label className="prechat-field">
-        <span className="prechat-label">Pangalan *</span>
+        <span className="prechat-label">Name *</span>
         <input className={`prechat-input${errors.name ? ' invalid' : ''}`} type="text" autoComplete="name"
           maxLength={100} value={form.name} onChange={update('name')} aria-invalid={!!errors.name} />
         {errors.name && <span className="prechat-error">{errors.name}</span>}
@@ -95,10 +93,10 @@ function PrechatForm({ onStart, starting }) {
       {formError && <div className="prechat-form-error" role="alert">⚠️ {formError}</div>}
 
       <button className="prechat-cta" type="submit" disabled={starting}>
-        {starting ? 'Sandali lang po…' : 'Simulan ang chat'}
+        {starting ? 'Starting…' : 'Start chat'}
       </button>
 
-      <p className="prechat-privacy">Gagamitin lang po namin ang inyong detalye para sagutin ang inyong mensahe.</p>
+      <p className="prechat-privacy">We only use your details to reply to your message.</p>
     </form>
   )
 }
@@ -110,12 +108,13 @@ export function ChatWidget() {
   const [input,       setInput]       = useState('')
   const [unread,      setUnread]      = useState(0)
   const [showTooltip, setShowTooltip] = useState(false)
+  const [showHours,   setShowHours]   = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef       = useRef(null)
   const prevCount      = useRef(0)
 
   const {
-    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
+    messages, isTyping, agentTyping, needsPrechat, ready, online, schedule,
     error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession
   } = useChat()
@@ -177,7 +176,8 @@ export function ChatWidget() {
     el.style.overflowY = want > INPUT_MAX_H ? 'auto' : 'hidden'
   }, [input, open, needsPrechat, ready])
 
-  const status = statusLine(online, nextOpenAt, serverDown)
+  const status = statusLine(online, serverDown)
+  const scheduleRows = formatSchedule(schedule)
 
   return (
     <>
@@ -192,25 +192,35 @@ export function ChatWidget() {
               {status && (
                 <div className={`header-status ${online && !serverDown ? 'online' : 'offline'}`}>
                   <span className="status-dot" aria-hidden="true" />{status}
+                  {scheduleRows.length > 0 && (
+                    <button className="hours-btn" type="button" onClick={() => setShowHours(v => !v)}
+                      aria-expanded={showHours} aria-label="Office hours" title="Office hours">🕗</button>
+                  )}
                 </div>
               )}
             </div>
             <div className="header-btns">
               {sessionId && (
-                <button className="icon-btn" onClick={resetSession} title="Bagong usapan" aria-label="Bagong usapan"><ResetIcon /></button>
+                <button className="icon-btn" onClick={resetSession} title="New chat" aria-label="New chat"><ResetIcon /></button>
               )}
-              <button className="icon-btn" onClick={() => setOpen(false)} title="Isara" aria-label="Isara"><CloseIcon /></button>
+              <button className="icon-btn" onClick={() => setOpen(false)} title="Close" aria-label="Close"><CloseIcon /></button>
             </div>
           </div>
 
-          {serverDown && (
-            <div className="offline-banner" role="status">
-              Hindi po available ang chat ngayon. Awtomatiko kaming susubok muli — puwede ninyong iwanang bukas ang page.
+          {showHours && scheduleRows.length > 0 && (
+            <div className="hours-panel">
+              {scheduleRows.map(r => (
+                <div className="hours-row" key={r.days}><span>{r.days}</span><span>{r.hours}</span></div>
+              ))}
             </div>
           )}
 
+          {serverDown && (
+            <div className="offline-banner" role="status">No connection. Retrying…</div>
+          )}
+
           {!ready ? (
-            <div className="messages" aria-busy="true" aria-label="Naglo-load">
+            <div className="messages" aria-busy="true" aria-label="Loading">
               <div className="skeleton-row left"><div className="skeleton-bubble w70" /></div>
               <div className="skeleton-row right"><div className="skeleton-bubble w50" /></div>
               <div className="skeleton-row left"><div className="skeleton-bubble w60" /></div>
@@ -252,8 +262,8 @@ export function ChatWidget() {
                 <div className="draft-preview">
                   {draftPreview
                     ? <PreviewCard preview={draftPreview} />
-                    : <div className="draft-preview-loading">Kinukuha ang preview…</div>}
-                  <button className="draft-preview-remove" type="button" aria-label="Alisin ang preview"
+                    : <div className="draft-preview-loading">Loading preview…</div>}
+                  <button className="draft-preview-remove" type="button" aria-label="Remove preview"
                     onClick={() => setDismissedLinks(s => new Set(s).add(draftCardLink.url))}>×</button>
                 </div>
               )}
@@ -266,28 +276,25 @@ export function ChatWidget() {
                   value={input}
                   onChange={handleChange}
                   onKeyDown={handleKey}
-                  placeholder={serverDown ? 'Offline · sandali lang po…' : 'I-type ang inyong mensahe...'}
+                  placeholder={serverDown ? 'Offline' : 'I-type ang inyong mensahe...'}
                   rows={1}
                   disabled={!canType}
                   aria-label="Message input"
                 />
-                <button className="send-btn" onClick={handleSend} disabled={!input.trim() || !canType} aria-label="Ipadala">
+                <button className="send-btn" onClick={handleSend} disabled={!input.trim() || !canType} aria-label="Send">
                   <SendIcon />
                 </button>
               </div>
             </>
           )}
 
-          <div className="chat-footer">
-            Powered by <a href="https://store.mediko.ph" target="_blank" rel="noopener">Mediko.ph</a>
-          </div>
         </div>
       )}
 
       {/* FAB */}
       <div className="fab-wrap">
         <button className={`fab${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}
-          aria-label={open ? 'Isara' : 'Buksan ang chat'}>
+          aria-label={open ? 'Close chat' : 'Open chat'}>
           {!open && <div className="fab-pulse" />}
           {open ? <CloseIcon /> : <ChatIcon />}
         </button>

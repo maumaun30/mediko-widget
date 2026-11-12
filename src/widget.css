@@ -460,14 +460,6 @@
 
 /* ══ Footer ═══════════════════════════════════════════════ */
 
-.chat-footer {
-  text-align: center;
-  font-size: 11px;
-  color: var(--mdk-muted);
-  padding: 5px 0 8px;
-  background: var(--mdk-surface);
-}
-.chat-footer a { color: var(--mdk-primary); text-decoration: none; font-weight: 500; }
 
 /* ══ Scrollbar ════════════════════════════════════════════ */
 
@@ -832,3 +824,24 @@
   cursor: pointer;
 }
 .draft-preview-remove:hover { background: var(--mdk-surface); }
+
+/* ── Office hours (🕗 in the header) ───────────────────── */
+.hours-btn {
+  background: rgba(255,255,255,.18);
+  border: none;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.hours-btn:hover, .hours-btn[aria-expanded="true"] { background: rgba(255,255,255,.32); }
+.hours-panel {
+  background: var(--mdk-surface);
+  border-bottom: 1px solid var(--mdk-border);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: var(--mdk-text);
+}
+.hours-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.hours-row span:first-child { font-weight: 600; }
