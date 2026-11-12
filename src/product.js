@@ -10,6 +10,18 @@ export function productHandle(url) {
   return HANDLE_RE.test(raw) ? raw : ''
 }
 
+/**
+ * True when a pasted URL is a product page on this store, so the bubble can
+ * add a card for it. Other hosts stay plain links (the card fetch is same-origin).
+ */
+export function isStoreProductUrl(href, host) {
+  try {
+    return new URL(href).host === host && productHandle(href) !== ''
+  } catch {
+    return false
+  }
+}
+
 /** Same-origin storefront JSON path for a handle. */
 export function productJsonPath(handle) {
   return `/products/${encodeURIComponent(handle)}.js`

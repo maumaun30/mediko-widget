@@ -19,7 +19,8 @@ function TooltipPopup({ onDismiss }) {
   )
 }
 
-function statusLine(online, nextOpenAt) {
+function statusLine(online, nextOpenAt, serverDown) {
+  if (serverDown) return 'Hindi makakonekta · sinusubukang muli…'
   if (online === true) return 'Online · karaniwang sumasagot sa loob ng ilang minuto'
   if (online === false) {
     const when = formatNextOpen(nextOpenAt)
@@ -111,7 +112,7 @@ export function ChatWidget() {
 
   const {
     messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
-    error, sessionId, autoOpen, starting,
+    error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession
   } = useChat()
 
@@ -134,7 +135,7 @@ export function ChatWidget() {
     if (open) { setUnread(0); setShowTooltip(false); setTimeout(() => inputRef.current?.focus(), 200) }
   }, [open])
 
-  const canType = !!sessionId && !isTyping
+  const canType = !!sessionId && !isTyping && !serverDown
 
   function handleSend() {
     const text = input.trim()
@@ -154,7 +155,7 @@ export function ChatWidget() {
     if (e.target.value.trim()) notifyTyping()
   }
 
-  const status = statusLine(online, nextOpenAt)
+  const status = statusLine(online, nextOpenAt, serverDown)
 
   return (
     <>
@@ -167,7 +168,7 @@ export function ChatWidget() {
             <div className="header-text">
               <div className="header-name">{STAFF_LABEL}</div>
               {status && (
-                <div className={`header-status ${online ? 'online' : 'offline'}`}>
+                <div className={`header-status ${online && !serverDown ? 'online' : 'offline'}`}>
                   <span className="status-dot" aria-hidden="true" />{status}
                 </div>
               )}
@@ -180,7 +181,19 @@ export function ChatWidget() {
             </div>
           </div>
 
-          {needsPrechat ? (
+          {serverDown && (
+            <div className="offline-banner" role="status">
+              Hindi po available ang chat ngayon. Awtomatiko kaming susubok muli — puwede ninyong iwanang bukas ang page.
+            </div>
+          )}
+
+          {!ready ? (
+            <div className="messages" aria-busy="true" aria-label="Naglo-load">
+              <div className="skeleton-row left"><div className="skeleton-bubble w70" /></div>
+              <div className="skeleton-row right"><div className="skeleton-bubble w50" /></div>
+              <div className="skeleton-row left"><div className="skeleton-bubble w60" /></div>
+            </div>
+          ) : needsPrechat ? (
             <div className="messages prechat-wrap">
               {error && <div className="prechat-form-error" role="alert">⚠️ {error}</div>}
               <PrechatForm onStart={startChat} starting={starting} />
@@ -200,7 +213,7 @@ export function ChatWidget() {
                 ))}
                 {isTyping    && <TypingIndicator />}
                 {agentTyping && <TypingIndicator />}
-                {error && (
+                {error && !serverDown && (
                   <div className="msg-row assistant">
                     <div className="bubble" style={{ background: '#fff0f0', borderColor: '#fecaca', color: '#991b1b' }}>
                       ⚠️ {error}
@@ -218,7 +231,7 @@ export function ChatWidget() {
                   value={input}
                   onChange={handleChange}
                   onKeyDown={handleKey}
-                  placeholder="I-type ang inyong mensahe..."
+                  placeholder={serverDown ? 'Offline · sandali lang po…' : 'I-type ang inyong mensahe...'}
                   rows={1}
                   disabled={!canType}
                   aria-label="Message input"

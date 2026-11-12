@@ -9,13 +9,22 @@ const RESUME_PARAM     = 'mdk_chat'
 const TYPING_THROTTLE  = 3000
 const CONFIG_REFRESH   = 5 * 60 * 1000
 const GENERIC_ERROR    = 'May nangyaring mali. Subukan ulit po.'
-const CONNECT_ERROR    = 'Hindi makakonekta sa server. I-refresh po ang page.'
+const CONNECT_ERROR    = 'Hindi makakonekta sa server. Sinusubukan naming muli…'
 const FETCH_OPTS       = { credentials: 'omit', mode: 'cors' }
 const RETRY_DELAYS     = [3000, 10000, 30000]   // history retry backoff; the last one repeats
 const SSE_REOPEN_DELAY = 5000
+const FETCH_TIMEOUT    = 8000            // a hung request must not freeze the widget
+const DOWN_RETRY       = 15000           // config re-check while the server is unreachable
 
 function localId() {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+// fetch with a timeout: an unreachable server fails fast instead of hanging.
+function timedFetch(url, opts = {}, ms = FETCH_TIMEOUT) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t))
 }
 
 async function readError(res, fallback) {
@@ -34,6 +43,7 @@ export function useChat() {
   const [error,        setError]        = useState(null)
   const [autoOpen,     setAutoOpen]     = useState(false)
   const [starting,     setStarting]     = useState(false)
+  const [serverDown,   setServerDown]   = useState(false)   // config check failed; retrying
 
   const sessionRef       = useRef(null)
   const aiRef            = useRef(false)
@@ -45,6 +55,8 @@ export function useChat() {
   const awayShown        = useRef(false)
   const retryTimer       = useRef(null)
   const retryAttempt     = useRef(0)
+  const downTimer        = useRef(null)
+  const wasDown          = useRef(false)
   const sseReopenTimer   = useRef(null)
 
   const addMessage = useCallback((role, content, extra = {}) => {
@@ -59,26 +71,44 @@ export function useChat() {
   useEffect(() => {
     if (initialised.current) return
     initialised.current = true
-    fetchConfig().then(init)
+    fetchConfig()
+    init()
     const t = setInterval(fetchConfig, CONFIG_REFRESH)
     return () => {
-      clearInterval(t); unsubscribeRealtime(); clearHistoryRetry()
+      clearInterval(t); clearTimeout(downTimer.current); unsubscribeRealtime(); clearHistoryRetry()
       clearTimeout(agentTypingTimer.current)
     }
   }, [])
 
   // ── Config ───────────────────────────────────────────────
 
+  // A failed check marks the server down and re-checks every DOWN_RETRY until it
+  // answers; coming back refills the open chat so nothing sent meanwhile is missed.
   async function fetchConfig() {
+    clearTimeout(downTimer.current)
+    let ok = false
     try {
-      const res = await fetch(`${API_URL}/api/chat/config`, FETCH_OPTS)
-      if (!res.ok) return
-      const cfg = await res.json()
-      const ai = cfg.aiEnabled === true
-      aiRef.current = ai
-      setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
-      setNextOpenAt(cfg.nextOpenAt || null)
+      const res = await timedFetch(`${API_URL}/api/chat/config`, FETCH_OPTS)
+      if (res.ok) {
+        const cfg = await res.json()
+        aiRef.current = cfg.aiEnabled === true
+        setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
+        setNextOpenAt(cfg.nextOpenAt || null)
+        ok = true
+      }
     } catch {}
+    if (ok) {
+      if (wasDown.current) {
+        wasDown.current = false
+        setError(e => (e === CONNECT_ERROR ? null : e))
+        if (sessionRef.current) refillHistory(sessionRef.current)
+      }
+      setServerDown(false)
+    } else {
+      wasDown.current = true
+      setServerDown(true)
+      downTimer.current = setTimeout(fetchConfig, DOWN_RETRY)
+    }
   }
 
   // ── Session bootstrap: resume link → localStorage → pre-chat form ──
@@ -89,7 +119,7 @@ export function useChat() {
     const token = readResumeToken(location.search)
     if (token) {
       try {
-        const res = await fetch(`${API_URL}/api/chat/resume?t=${encodeURIComponent(token)}`, FETCH_OPTS)
+        const res = await timedFetch(`${API_URL}/api/chat/resume?t=${encodeURIComponent(token)}`, FETCH_OPTS)
         if (res.ok) {
           const body = await res.json()
           if (body?.sessionId) {
@@ -135,7 +165,7 @@ export function useChat() {
   async function fetchHistory(sid) {
     let status = null
     try {
-      const res = await fetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
+      const res = await timedFetch(`${API_URL}/api/chat/history/${sid}`, FETCH_OPTS)
       status = res.status
       if (res.ok) {
         const { messages: rows = [] } = await res.json()
@@ -200,7 +230,7 @@ export function useChat() {
     setStarting(true)
     setError(null)
     try {
-      const res = await fetch(`${API_URL}/api/chat/session`, {
+      const res = await timedFetch(`${API_URL}/api/chat/session`, {
         ...FETCH_OPTS, method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...value, metadata: { url: location.href } })
@@ -290,7 +320,7 @@ export function useChat() {
     const now = Date.now()
     if (now - lastTypingSent.current < TYPING_THROTTLE) return
     lastTypingSent.current = now
-    fetch(`${API_URL}/api/chat/typing`, {
+    timedFetch(`${API_URL}/api/chat/typing`, {
       ...FETCH_OPTS, method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: sid })
@@ -309,7 +339,7 @@ export function useChat() {
     const tempId = localId()
     setMessages(prev => [...prev, { id: tempId, role: 'user', content: text, ts: new Date().toISOString() }])
     try {
-      const res = await fetch(`${API_URL}/api/chat/message`, {
+      const res = await timedFetch(`${API_URL}/api/chat/message`, {
         ...FETCH_OPTS, method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: sid, message: text })
@@ -436,7 +466,7 @@ export function useChat() {
 
   return {
     messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
-    error, sessionId, autoOpen, starting,
+    error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession
   }
 }
