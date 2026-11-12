@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
 import { validatePrechat, formatNextOpen } from '../prechat.js'
-import { Message, TypingIndicator, isStaffRole, STAFF_LABEL } from './Message.jsx'
+import { Message, TypingIndicator, isStaffRole, STAFF_LABEL, PreviewCard } from './Message.jsx'
+import { storeProductLink } from '../product.js'
+import { useStorePreview } from '../hooks/useStorePreview.js'
 
 const ChatIcon  = () => <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
 const CloseIcon = () => <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
@@ -139,11 +141,19 @@ export function ChatWidget() {
 
   const canType = !!sessionId && !isTyping && !serverDown
 
+  // WhatsApp-style: a store product link in the draft shows a card above the box;
+  // × removes it (for that link), and the message is then sent with hidePreview.
+  const [dismissedLinks, setDismissedLinks] = useState(() => new Set())
+  const draftLink = storeProductLink(input, location.host)
+  const draftCardLink = draftLink && !dismissedLinks.has(draftLink.url) ? draftLink : null
+  const { preview: draftPreview, loading: draftLoading } = useStorePreview(draftCardLink)
+
   function handleSend() {
     const text = input.trim()
     if (!text || !canType) return
+    const link = storeProductLink(text, location.host)
     setInput('')
-    sendMessage(text)
+    sendMessage(text, { hidePreview: !!link && dismissedLinks.has(link.url) })
   }
 
   function handleKey(e) {
@@ -221,6 +231,7 @@ export function ChatWidget() {
                     content={m.content}
                     ts={m.ts}
                     preview={m.preview}
+                    hidePreview={m.hidePreview}
                     showLabel={isStaffRole(m.role) && (idx === 0 || !isStaffRole(messages[idx - 1]?.role))}
                   />
                 ))}
@@ -235,6 +246,17 @@ export function ChatWidget() {
                 )}
                 <div ref={messagesEndRef} />
               </div>
+
+              {/* Link preview for the draft */}
+              {draftCardLink && (draftLoading || draftPreview) && (
+                <div className="draft-preview">
+                  {draftPreview
+                    ? <PreviewCard preview={draftPreview} />
+                    : <div className="draft-preview-loading">Kinukuha ang preview…</div>}
+                  <button className="draft-preview-remove" type="button" aria-label="Alisin ang preview"
+                    onClick={() => setDismissedLinks(s => new Set(s).add(draftCardLink.url))}>×</button>
+                </div>
+              )}
 
               {/* Input */}
               <div className="input-area">

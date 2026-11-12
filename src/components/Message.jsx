@@ -1,6 +1,7 @@
 import React from 'react'
 import { tokenizeLinks } from '../linkify.js'
-import { formatPreviewPrice } from '../product.js'
+import { formatPreviewPrice, storeProductLink } from '../product.js'
+import { useStorePreview } from '../hooks/useStorePreview.js'
 
 
 // ── Product card renderer ────────────────────────────────
@@ -83,7 +84,7 @@ function pushText(str, key, elements) {
 }
 
 // Link preview sent with an agent reply (already sanitized by safePreview).
-function PreviewCard({ preview }) {
+export function PreviewCard({ preview }) {
   const price = formatPreviewPrice(preview.price, preview.currency)
   return (
     <a className="product-card" href={preview.url} target="_blank" rel="noopener noreferrer">
@@ -106,7 +107,14 @@ export function isStaffRole(role) {
   return role === 'agent' || role === 'assistant'
 }
 
-export function Message({ role, content, ts, showLabel, preview }) {
+// Card under a customer's own message, built in their browser (same origin).
+function CustomerLinkCard({ content }) {
+  const link = storeProductLink(content, location.host)
+  const { preview } = useStorePreview(link)
+  return preview ? <div className="product-cards"><PreviewCard preview={preview} /></div> : null
+}
+
+export function Message({ role, content, ts, showLabel, preview, hidePreview }) {
   if (!content) return null
 
   const parsed = renderContent(content)
@@ -124,6 +132,7 @@ export function Message({ role, content, ts, showLabel, preview }) {
       {staff && preview && (
         <div className="product-cards"><PreviewCard preview={preview} /></div>
       )}
+      {!staff && !hidePreview && <CustomerLinkCard content={content} />}
       <div className="msg-time">{formatTime(ts)}</div>
     </div>
   )
