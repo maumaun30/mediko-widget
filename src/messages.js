@@ -23,7 +23,8 @@ export function fromServer(m) {
     role:    staff ? 'agent' : 'user',
     content: staff ? stripLegacyPrefix(m.content) : m.content,
     ts:      toIso(m.created_at),
-    preview: staff ? safePreview(m.preview) : null
+    preview: staff ? safePreview(m.preview) : null,
+    hidePreview: !staff && m.hidePreview === true
   }
 }
 

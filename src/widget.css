@@ -807,3 +807,28 @@
 .skeleton-bubble.w70 { width: 70%; }
 @keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .skeleton-bubble { animation: none; } }
+
+/* ── Link preview above the input (WhatsApp-style) ──────── */
+.draft-preview {
+  position: relative;
+  padding: 8px 12px 0;
+  background: var(--mdk-bg);
+  border-top: 1px solid var(--mdk-border);
+}
+.draft-preview .product-card { margin: 0; padding-right: 34px; }
+.draft-preview-loading { font-size: 12.5px; color: var(--mdk-muted); padding: 6px 2px; }
+.draft-preview-remove {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--mdk-border);
+  background: #fff;
+  color: var(--mdk-text);
+  font-size: 15px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.draft-preview-remove:hover { background: var(--mdk-surface); }

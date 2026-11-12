@@ -329,7 +329,8 @@ export function useChat() {
 
   // ── Send message ─────────────────────────────────────────
 
-  const sendMessage = useCallback(async (text) => {
+  // hidePreview: the customer removed the link card (staff won't show one either).
+  const sendMessage = useCallback(async (text, { hidePreview = false } = {}) => {
     const sid = sessionRef.current
     if (!text.trim() || isTyping || !sid) return
     setError(null)
@@ -337,12 +338,12 @@ export function useChat() {
 
     // Human-only path: POST /api/chat/message
     const tempId = localId()
-    setMessages(prev => [...prev, { id: tempId, role: 'user', content: text, ts: new Date().toISOString() }])
+    setMessages(prev => [...prev, { id: tempId, role: 'user', content: text, ts: new Date().toISOString(), hidePreview }])
     try {
       const res = await timedFetch(`${API_URL}/api/chat/message`, {
         ...FETCH_OPTS, method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sid, message: text })
+        body: JSON.stringify({ sessionId: sid, message: text, ...(hidePreview && { hidePreview: true }) })
       })
       if (res.status === 404) {
         setMessages(prev => prev.filter(m => m.id !== tempId))
