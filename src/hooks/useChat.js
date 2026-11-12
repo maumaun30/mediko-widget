@@ -9,7 +9,7 @@ const RESUME_PARAM     = 'mdk_chat'
 const TYPING_THROTTLE  = 3000
 const CONFIG_REFRESH   = 5 * 60 * 1000
 const GENERIC_ERROR    = 'May nangyaring mali. Subukan ulit po.'
-const CONNECT_ERROR    = 'Hindi makakonekta sa server. Sinusubukan naming muli…'
+const CONNECT_ERROR    = 'Hindi makakonekta. Sinusubukang muli…'
 const FETCH_OPTS       = { credentials: 'omit', mode: 'cors' }
 const RETRY_DELAYS     = [3000, 10000, 30000]   // history retry backoff; the last one repeats
 const SSE_REOPEN_DELAY = 5000
@@ -40,6 +40,7 @@ export function useChat() {
   const [ready,        setReady]        = useState(false)
   const [online,       setOnline]       = useState(null)
   const [nextOpenAt,   setNextOpenAt]   = useState(null)
+  const [schedule,     setSchedule]     = useState(null)   // office hours for the header popover
   const [error,        setError]        = useState(null)
   const [autoOpen,     setAutoOpen]     = useState(false)
   const [starting,     setStarting]     = useState(false)
@@ -94,6 +95,7 @@ export function useChat() {
         aiRef.current = cfg.aiEnabled === true
         setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
         setNextOpenAt(cfg.nextOpenAt || null)
+        setSchedule(cfg.schedule || null)
         ok = true
       }
     } catch {}
@@ -466,7 +468,7 @@ export function useChat() {
   }
 
   return {
-    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
+    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt, schedule,
     error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession
   }

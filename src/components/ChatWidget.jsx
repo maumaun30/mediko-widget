@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
-import { validatePrechat, formatNextOpen } from '../prechat.js'
+import { validatePrechat } from '../prechat.js'
+import { formatSchedule } from '../schedule.js'
 import { Message, TypingIndicator, isStaffRole, STAFF_LABEL, PreviewCard } from './Message.jsx'
 import { storeProductLink } from '../product.js'
 import { useStorePreview } from '../hooks/useStorePreview.js'
@@ -21,14 +22,11 @@ function TooltipPopup({ onDismiss }) {
   )
 }
 
-function statusLine(online, nextOpenAt, serverDown) {
-  if (serverDown) return 'Hindi makakonekta · sinusubukang muli…'
-  if (online === true) return 'Online · karaniwang sumasagot sa loob ng ilang minuto'
-  if (online === false) {
-    const when = formatNextOpen(nextOpenAt)
-    return when ? `Offline · babalik ${when}` : 'Offline'
-  }
-  return ''
+// Header shows only Online/Offline; office hours live in the 🕗 popover.
+function statusLine(online, serverDown) {
+  if (serverDown || online === false) return 'Offline'
+  if (online === true) return 'Online'
+  return null
 }
 
 // Logged-in Shopify customer passed from the theme: window.MEDIKO_CUSTOMER = { name, email, phone }
@@ -68,7 +66,7 @@ function PrechatForm({ onStart, starting }) {
 
   return (
     <form className="prechat" onSubmit={submit} noValidate>
-      <p className="prechat-intro">Bago tayo magsimula, pakilagay po ang inyong detalye:</p>
+      <p className="prechat-intro">Ilagay ang inyong detalye para makapagsimula.</p>
 
       <label className="prechat-field">
         <span className="prechat-label">Pangalan *</span>
@@ -110,12 +108,13 @@ export function ChatWidget() {
   const [input,       setInput]       = useState('')
   const [unread,      setUnread]      = useState(0)
   const [showTooltip, setShowTooltip] = useState(false)
+  const [showHours,   setShowHours]   = useState(false)
   const messagesEndRef = useRef(null)
   const inputRef       = useRef(null)
   const prevCount      = useRef(0)
 
   const {
-    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt,
+    messages, isTyping, agentTyping, needsPrechat, ready, online, schedule,
     error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession
   } = useChat()
@@ -177,7 +176,8 @@ export function ChatWidget() {
     el.style.overflowY = want > INPUT_MAX_H ? 'auto' : 'hidden'
   }, [input, open, needsPrechat, ready])
 
-  const status = statusLine(online, nextOpenAt, serverDown)
+  const status = statusLine(online, serverDown)
+  const scheduleRows = formatSchedule(schedule)
 
   return (
     <>
@@ -192,6 +192,10 @@ export function ChatWidget() {
               {status && (
                 <div className={`header-status ${online && !serverDown ? 'online' : 'offline'}`}>
                   <span className="status-dot" aria-hidden="true" />{status}
+                  {scheduleRows.length > 0 && (
+                    <button className="hours-btn" type="button" onClick={() => setShowHours(v => !v)}
+                      aria-expanded={showHours} aria-label="Oras ng opisina" title="Oras ng opisina">🕗</button>
+                  )}
                 </div>
               )}
             </div>
@@ -203,10 +207,16 @@ export function ChatWidget() {
             </div>
           </div>
 
-          {serverDown && (
-            <div className="offline-banner" role="status">
-              Hindi po available ang chat ngayon. Awtomatiko kaming susubok muli — puwede ninyong iwanang bukas ang page.
+          {showHours && scheduleRows.length > 0 && (
+            <div className="hours-panel">
+              {scheduleRows.map(r => (
+                <div className="hours-row" key={r.days}><span>{r.days}</span><span>{r.hours}</span></div>
+              ))}
             </div>
+          )}
+
+          {serverDown && (
+            <div className="offline-banner" role="status">Walang koneksyon. Sinusubukang muli…</div>
           )}
 
           {!ready ? (
@@ -266,7 +276,7 @@ export function ChatWidget() {
                   value={input}
                   onChange={handleChange}
                   onKeyDown={handleKey}
-                  placeholder={serverDown ? 'Offline · sandali lang po…' : 'I-type ang inyong mensahe...'}
+                  placeholder={serverDown ? 'Offline' : 'I-type ang inyong mensahe...'}
                   rows={1}
                   disabled={!canType}
                   aria-label="Message input"
@@ -278,9 +288,6 @@ export function ChatWidget() {
             </>
           )}
 
-          <div className="chat-footer">
-            Powered by <a href="https://store.mediko.ph" target="_blank" rel="noopener">Mediko.ph</a>
-          </div>
         </div>
       )}
 
