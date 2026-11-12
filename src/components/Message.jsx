@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { tokenizeLinks } from '../linkify.js'
+import { productHandle, productJsonPath, fromAjaxProduct } from '../product.js'
 
-const API_URL = import.meta.env.VITE_API_URL
 
 function formatPrice(amount, currency = 'PHP') {
   if (amount == null || amount === '') return ''
@@ -101,14 +101,16 @@ function pushText(str, key, elements) {
 }
 
 function ProductCard({ label, url }) {
-  const handle = url.split('/products/')[1]?.split('?')[0] || ''
+  const handle = productHandle(url)
   const [data, setData] = useState(() => productCache.get(handle) || null)
 
   useEffect(() => {
     if (!handle || data) return
     let alive = true
-    fetch(`${API_URL}/api/products/by-handle/${handle}`, { credentials: 'omit', mode: 'cors' })
+    const currency = window.Shopify?.currency?.active || 'PHP'
+    fetch(productJsonPath(handle), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
       .then(r => (r.ok ? r.json() : null))
+      .then(raw => fromAjaxProduct(raw, currency))
       .then(d => { if (d) { productCache.set(handle, d); if (alive) setData(d) } })
       .catch(() => {})
     return () => { alive = false }
