@@ -59,4 +59,4 @@ export function shouldClearSession(status) {
 }
 
 /** Shown when the server no longer knows the session (404). Local Filipino copy, never the server's text. */
-export const SESSION_GONE = 'Natapos na po ang chat na ito. Pakisagutan ulit ang form para makapagsimula ng bagong chat.'
+export const SESSION_GONE = 'This chat has ended. Fill in the form to start a new one.'

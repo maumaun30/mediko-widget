@@ -66,10 +66,10 @@ function PrechatForm({ onStart, starting }) {
 
   return (
     <form className="prechat" onSubmit={submit} noValidate>
-      <p className="prechat-intro">Ilagay ang inyong detalye para makapagsimula.</p>
+      <p className="prechat-intro">Enter your details to start.</p>
 
       <label className="prechat-field">
-        <span className="prechat-label">Pangalan *</span>
+        <span className="prechat-label">Name *</span>
         <input className={`prechat-input${errors.name ? ' invalid' : ''}`} type="text" autoComplete="name"
           maxLength={100} value={form.name} onChange={update('name')} aria-invalid={!!errors.name} />
         {errors.name && <span className="prechat-error">{errors.name}</span>}
@@ -93,10 +93,10 @@ function PrechatForm({ onStart, starting }) {
       {formError && <div className="prechat-form-error" role="alert">⚠️ {formError}</div>}
 
       <button className="prechat-cta" type="submit" disabled={starting}>
-        {starting ? 'Sandali lang po…' : 'Simulan ang chat'}
+        {starting ? 'Starting…' : 'Start chat'}
       </button>
 
-      <p className="prechat-privacy">Gagamitin lang po namin ang inyong detalye para sagutin ang inyong mensahe.</p>
+      <p className="prechat-privacy">We only use your details to reply to your message.</p>
     </form>
   )
 }
@@ -194,16 +194,16 @@ export function ChatWidget() {
                   <span className="status-dot" aria-hidden="true" />{status}
                   {scheduleRows.length > 0 && (
                     <button className="hours-btn" type="button" onClick={() => setShowHours(v => !v)}
-                      aria-expanded={showHours} aria-label="Oras ng opisina" title="Oras ng opisina">🕗</button>
+                      aria-expanded={showHours} aria-label="Office hours" title="Office hours">🕗</button>
                   )}
                 </div>
               )}
             </div>
             <div className="header-btns">
               {sessionId && (
-                <button className="icon-btn" onClick={resetSession} title="Bagong usapan" aria-label="Bagong usapan"><ResetIcon /></button>
+                <button className="icon-btn" onClick={resetSession} title="New chat" aria-label="New chat"><ResetIcon /></button>
               )}
-              <button className="icon-btn" onClick={() => setOpen(false)} title="Isara" aria-label="Isara"><CloseIcon /></button>
+              <button className="icon-btn" onClick={() => setOpen(false)} title="Close" aria-label="Close"><CloseIcon /></button>
             </div>
           </div>
 
@@ -216,11 +216,11 @@ export function ChatWidget() {
           )}
 
           {serverDown && (
-            <div className="offline-banner" role="status">Walang koneksyon. Sinusubukang muli…</div>
+            <div className="offline-banner" role="status">No connection. Retrying…</div>
           )}
 
           {!ready ? (
-            <div className="messages" aria-busy="true" aria-label="Naglo-load">
+            <div className="messages" aria-busy="true" aria-label="Loading">
               <div className="skeleton-row left"><div className="skeleton-bubble w70" /></div>
               <div className="skeleton-row right"><div className="skeleton-bubble w50" /></div>
               <div className="skeleton-row left"><div className="skeleton-bubble w60" /></div>
@@ -262,8 +262,8 @@ export function ChatWidget() {
                 <div className="draft-preview">
                   {draftPreview
                     ? <PreviewCard preview={draftPreview} />
-                    : <div className="draft-preview-loading">Kinukuha ang preview…</div>}
-                  <button className="draft-preview-remove" type="button" aria-label="Alisin ang preview"
+                    : <div className="draft-preview-loading">Loading preview…</div>}
+                  <button className="draft-preview-remove" type="button" aria-label="Remove preview"
                     onClick={() => setDismissedLinks(s => new Set(s).add(draftCardLink.url))}>×</button>
                 </div>
               )}
@@ -281,7 +281,7 @@ export function ChatWidget() {
                   disabled={!canType}
                   aria-label="Message input"
                 />
-                <button className="send-btn" onClick={handleSend} disabled={!input.trim() || !canType} aria-label="Ipadala">
+                <button className="send-btn" onClick={handleSend} disabled={!input.trim() || !canType} aria-label="Send">
                   <SendIcon />
                 </button>
               </div>
@@ -294,7 +294,7 @@ export function ChatWidget() {
       {/* FAB */}
       <div className="fab-wrap">
         <button className={`fab${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}
-          aria-label={open ? 'Isara' : 'Buksan ang chat'}>
+          aria-label={open ? 'Close chat' : 'Open chat'}>
           {!open && <div className="fab-pulse" />}
           {open ? <CloseIcon /> : <ChatIcon />}
         </button>
