@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
 import { validatePrechat, formatNextOpen } from '../prechat.js'
 import { Message, TypingIndicator, isStaffRole, STAFF_LABEL } from './Message.jsx'
@@ -101,6 +101,8 @@ function PrechatForm({ onStart, starting }) {
   )
 }
 
+const INPUT_MAX_H = 120
+
 export function ChatWidget() {
   const [open,        setOpen]        = useState(false)
   const [input,       setInput]       = useState('')
@@ -140,7 +142,7 @@ export function ChatWidget() {
   function handleSend() {
     const text = input.trim()
     if (!text || !canType) return
-    setInput(''); if (inputRef.current) inputRef.current.style.height = ''
+    setInput('')
     sendMessage(text)
   }
 
@@ -150,10 +152,20 @@ export function ChatWidget() {
 
   function handleChange(e) {
     setInput(e.target.value)
-    e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
     if (e.target.value.trim()) notifyTyping()
   }
+
+  // Fit the box to its text (1 line up to INPUT_MAX_H) whenever the text changes
+  // or the window reopens (the textarea remounts). Scrollbar only past the max.
+  useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const border = el.offsetHeight - el.clientHeight
+    const want = el.scrollHeight + border
+    el.style.height = Math.min(want, INPUT_MAX_H) + 'px'
+    el.style.overflowY = want > INPUT_MAX_H ? 'auto' : 'hidden'
+  }, [input, open, needsPrechat, ready])
 
   const status = statusLine(online, nextOpenAt, serverDown)
 
