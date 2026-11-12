@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { tokenizeLinks } from '../linkify.js'
-import { productHandle, productJsonPath, fromAjaxProduct } from '../product.js'
+import { productHandle, productJsonPath, fromAjaxProduct, isStoreProductUrl } from '../product.js'
 
 
 function formatPrice(amount, currency = 'PHP') {
@@ -61,6 +61,10 @@ function renderContent(text) {
         </span>
       )
     } else {
+      // A pasted product link from this store also gets a card under the bubble.
+      if (isStoreProductUrl(tok.href, location.host) && !productLinks.some(p => p.url === tok.href)) {
+        productLinks.push({ label: tok.label, url: tok.href })
+      }
       elements.push(
         <a key={key++} href={tok.href} target="_blank" rel="noopener noreferrer"
            style={{ fontWeight: 500, textDecoration: 'underline', color: 'inherit', wordBreak: 'break-all' }}>

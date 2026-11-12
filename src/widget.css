@@ -779,3 +779,30 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ── Server unreachable ─────────────────────────────────── */
+.offline-banner {
+  background: var(--mdk-secondary-lt);
+  border-bottom: 1px solid var(--mdk-secondary);
+  color: var(--mdk-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 14px;
+}
+
+/* ── Loading skeleton ───────────────────────────────────── */
+.skeleton-row { display: flex; margin: 6px 0; }
+.skeleton-row.left  { justify-content: flex-start; }
+.skeleton-row.right { justify-content: flex-end; }
+.skeleton-bubble {
+  height: 38px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--mdk-bot-bg) 25%, var(--mdk-border) 50%, var(--mdk-bot-bg) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.2s ease-in-out infinite;
+}
+.skeleton-bubble.w50 { width: 50%; }
+.skeleton-bubble.w60 { width: 60%; }
+.skeleton-bubble.w70 { width: 70%; }
+@keyframes skeletonShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-bubble { animation: none; } }
