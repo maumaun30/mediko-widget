@@ -1,17 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { tokenizeLinks } from '../linkify.js'
-import { productHandle, productJsonPath, fromAjaxProduct, isStoreProductUrl } from '../product.js'
+import { formatPreviewPrice } from '../product.js'
 
-
-function formatPrice(amount, currency = 'PHP') {
-  if (amount == null || amount === '') return ''
-  const n = parseFloat(amount)
-  if (Number.isNaN(n)) return ''
-  return `${currency === 'PHP' ? '₱' : ''}${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-
-// Small module-level cache so the same product isn't re-fetched per card/render.
-const productCache = new Map()
 
 // ── Product card renderer ────────────────────────────────
 // Detects [[PRODUCT:title|price|url|image]] tags injected by the API
@@ -40,31 +30,19 @@ function formatTime(ts) {
 
 /**
  * Turn message text into elements. http(s) links (markdown or bare) become
- * anchors; markdown links to /products/ pages are also collected so staff
- * bubbles can show product cards. Any other scheme stays plain text.
+ * anchors; any other scheme stays plain text. Product cards come only from the
+ * reply's `preview` (see PreviewCard).
  */
 function renderContent(text) {
   if (!text) return null
 
-  const productLinks = []
   const elements = []
   let key = 0
 
   for (const tok of tokenizeLinks(text)) {
     if (tok.type === 'text') {
       pushText(tok.text, key++, elements)
-    } else if (tok.type === 'product') {
-      productLinks.push({ label: tok.label, url: tok.href })
-      elements.push(
-        <span key={key++} style={{ color: 'var(--mdk-primary)', fontWeight: 500 }}>
-          {tok.label}
-        </span>
-      )
     } else {
-      // A pasted product link from this store also gets a card under the bubble.
-      if (isStoreProductUrl(tok.href, location.host) && !productLinks.some(p => p.url === tok.href)) {
-        productLinks.push({ label: tok.label, url: tok.href })
-      }
       elements.push(
         <a key={key++} href={tok.href} target="_blank" rel="noopener noreferrer"
            style={{ fontWeight: 500, textDecoration: 'underline', color: 'inherit', wordBreak: 'break-all' }}>
@@ -74,7 +52,7 @@ function renderContent(text) {
     }
   }
 
-  return { elements, productLinks }
+  return { elements }
 }
 
 // Render a single line of text, turning **bold** into <strong>.
@@ -104,33 +82,17 @@ function pushText(str, key, elements) {
   })
 }
 
-function ProductCard({ label, url }) {
-  const handle = productHandle(url)
-  const [data, setData] = useState(() => productCache.get(handle) || null)
-
-  useEffect(() => {
-    if (!handle || data) return
-    let alive = true
-    const currency = window.Shopify?.currency?.active || 'PHP'
-    fetch(productJsonPath(handle), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-      .then(r => (r.ok ? r.json() : null))
-      .then(raw => fromAjaxProduct(raw, currency))
-      .then(d => { if (d) { productCache.set(handle, d); if (alive) setData(d) } })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [handle])
-
-  const title = data?.title || label
-  const price = formatPrice(data?.price, data?.currency)
-
+// Link preview sent with an agent reply (already sanitized by safePreview).
+function PreviewCard({ preview }) {
+  const price = formatPreviewPrice(preview.price, preview.currency)
   return (
-    <a className="product-card" href={url} target="_blank" rel="noopener noreferrer">
-      {data?.image
-        ? <img className="product-card-img" src={data.image} alt={title} loading="lazy" />
+    <a className="product-card" href={preview.url} target="_blank" rel="noopener noreferrer">
+      {preview.image
+        ? <img className="product-card-img" src={preview.image} alt="" loading="lazy" />
         : <div className="product-card-img-placeholder">💊</div>}
       <div className="product-card-info">
-        <div className="product-card-name">{title}</div>
-        <div className="product-card-price">{price || ' '}</div>
+        <div className="product-card-name">{preview.title}</div>
+        {price && <div className="product-card-price">{price}</div>}
       </div>
       <span className="product-card-arrow">→</span>
     </a>
@@ -144,13 +106,13 @@ export function isStaffRole(role) {
   return role === 'agent' || role === 'assistant'
 }
 
-export function Message({ role, content, ts, showLabel }) {
+export function Message({ role, content, ts, showLabel, preview }) {
   if (!content) return null
 
   const parsed = renderContent(content)
   if (!parsed) return null
 
-  const { elements, productLinks } = parsed
+  const { elements } = parsed
   const staff = isStaffRole(role)
 
   return (
@@ -159,12 +121,8 @@ export function Message({ role, content, ts, showLabel }) {
         <div className="bot-label">{STAFF_LABEL}</div>
       )}
       <div className="bubble">{elements}</div>
-      {productLinks.length > 0 && staff && (
-        <div className="product-cards">
-          {productLinks.map((p, i) => (
-            <ProductCard key={i} label={p.label} url={p.url} />
-          ))}
-        </div>
+      {staff && preview && (
+        <div className="product-cards"><PreviewCard preview={preview} /></div>
       )}
       <div className="msg-time">{formatTime(ts)}</div>
     </div>

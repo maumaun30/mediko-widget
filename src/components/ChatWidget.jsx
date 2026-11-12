@@ -208,6 +208,7 @@ export function ChatWidget() {
                     role={m.role}
                     content={m.content}
                     ts={m.ts}
+                    preview={m.preview}
                     showLabel={isStaffRole(m.role) && (idx === 0 || !isStaffRole(messages[idx - 1]?.role))}
                   />
                 ))}

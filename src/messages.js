@@ -1,3 +1,4 @@
+import { safePreview } from './product.js'
 // Pure message-list helpers for useChat (no React, no DOM).
 // Imported by the widget and by mediko-chatbot/tests/widget.test.js.
 
@@ -21,7 +22,8 @@ export function fromServer(m) {
     id:      m.id,
     role:    staff ? 'agent' : 'user',
     content: staff ? stripLegacyPrefix(m.content) : m.content,
-    ts:      toIso(m.created_at)
+    ts:      toIso(m.created_at),
+    preview: staff ? safePreview(m.preview) : null
   }
 }
 
