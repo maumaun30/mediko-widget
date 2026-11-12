@@ -423,8 +423,9 @@
   color: var(--mdk-text);
   resize: none;
   outline: none;
-  min-height: 46px;
+  min-height: 48px;          /* 21px line + 24px padding + 3px border (border-box) */
   max-height: 120px;
+  overflow-y: hidden;        /* ChatWidget turns scrolling on only past max-height */
   background: #fff;
   line-height: 1.4;
   transition: border-color .2s, box-shadow .2s;
