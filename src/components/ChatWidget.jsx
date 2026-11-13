@@ -109,6 +109,7 @@ export function ChatWidget() {
   const [unread,      setUnread]      = useState(0)
   const [showTooltip, setShowTooltip] = useState(false)
   const [showHours,   setShowHours]   = useState(false)
+  const hoursToggled = useRef(false)   // once the customer uses 🕗, stop auto showing/hiding
   const messagesEndRef = useRef(null)
   const inputRef       = useRef(null)
   const prevCount      = useRef(0)
@@ -177,6 +178,11 @@ export function ChatWidget() {
   }, [input, open, needsPrechat, ready])
 
   const status = statusLine(online, serverDown)
+
+  // Outside office hours the schedule starts open; during office hours it starts closed.
+  useEffect(() => {
+    if (!hoursToggled.current && online !== null) setShowHours(online === false)
+  }, [online])
   const scheduleRows = formatSchedule(schedule)
 
   return (
@@ -193,7 +199,7 @@ export function ChatWidget() {
                 <div className={`header-status ${online && !serverDown ? 'online' : 'offline'}`}>
                   <span className="status-dot" aria-hidden="true" />{status}
                   {scheduleRows.length > 0 && (
-                    <button className="hours-btn" type="button" onClick={() => setShowHours(v => !v)}
+                    <button className="hours-btn" type="button" onClick={() => { hoursToggled.current = true; setShowHours(v => !v) }}
                       aria-expanded={showHours} aria-label="Office hours" title="Office hours">🕗</button>
                   )}
                 </div>
