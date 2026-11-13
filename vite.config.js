@@ -7,6 +7,19 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Preact via its React-compatible layer: same React source code, about half
+    // the bundle size on every store page. JSX still compiles to react/jsx-runtime,
+    // which is aliased too.
+    resolve: {
+      alias: {
+        'react-dom/client':    'preact/compat/client',
+        'react-dom/test-utils': 'preact/test-utils',
+        'react-dom':           'preact/compat',
+        'react/jsx-runtime':   'preact/jsx-runtime',
+        'react/jsx-dev-runtime': 'preact/jsx-dev-runtime',
+        'react':               'preact/compat'
+      }
+    },
     define: {
       'process.env.NODE_ENV':         JSON.stringify('production'),
       'import.meta.env.VITE_API_URL': JSON.stringify(env.VITE_API_URL || 'https://mediko-chatbot-production.up.railway.app'),
