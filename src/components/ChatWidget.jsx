@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useChat } from '../hooks/useChat.js'
 import { validatePrechat } from '../prechat.js'
 import { formatSchedule } from '../schedule.js'
+import { TrackOrder } from './TrackOrder.jsx'
 import { Message, TypingIndicator, isStaffRole, STAFF_LABEL, PreviewCard } from './Message.jsx'
 import { storeProductLink } from '../product.js'
 import { useStorePreview } from '../hooks/useStorePreview.js'
@@ -109,6 +110,7 @@ export function ChatWidget() {
   const [unread,      setUnread]      = useState(0)
   const [showTooltip, setShowTooltip] = useState(false)
   const [showHours,   setShowHours]   = useState(false)
+  const [view,        setView]        = useState('chat')   // 'chat' | 'track'
   const messagesEndRef = useRef(null)
   const inputRef       = useRef(null)
   const prevCount      = useRef(0)
@@ -116,7 +118,7 @@ export function ChatWidget() {
   const {
     messages, isTyping, agentTyping, needsPrechat, ready, online, schedule,
     error, sessionId, autoOpen, starting, serverDown,
-    startChat, sendMessage, notifyTyping, resetSession
+    startChat, sendMessage, notifyTyping, resetSession, trackOrder
   } = useChat()
 
   useEffect(() => { const t = setTimeout(() => setShowTooltip(true), 2500); return () => clearTimeout(t) }, [])
@@ -219,7 +221,24 @@ export function ChatWidget() {
             <div className="offline-banner" role="status">No connection. Retrying…</div>
           )}
 
-          {!ready ? (
+          {ready && view === 'chat' && (
+            <div className="track-entry">
+              <button type="button" className="track-entry-btn" onClick={() => setView('track')}>📦 Track my order</button>
+            </div>
+          )}
+
+          {view === 'track' ? (
+            <TrackOrder
+              trackOrder={trackOrder}
+              onBack={() => setView('chat')}
+              onChat={(order) => {
+                // Start the chat with the order number so the agent sees it flagged.
+                setInput(cur => (cur.trim() ? cur : `Order ${order}: `))
+                setView('chat')
+                setTimeout(() => inputRef.current?.focus(), 50)
+              }}
+            />
+          ) : !ready ? (
             <div className="messages" aria-busy="true" aria-label="Loading">
               <div className="skeleton-row left"><div className="skeleton-bubble w70" /></div>
               <div className="skeleton-row right"><div className="skeleton-bubble w50" /></div>

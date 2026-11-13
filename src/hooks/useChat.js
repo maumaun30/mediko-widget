@@ -462,6 +462,25 @@ export function useChat() {
     setNeedsPrechat(true)
   }
 
+  // "Track my order": works without a chat session. Returns
+  // { ok: true, found, status } or { ok: false, error } (English copy for the panel).
+  async function trackOrder({ order, contact }) {
+    try {
+      const res = await timedFetch(`${API_URL}/api/chat/order-status`, {
+        ...FETCH_OPTS, method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order, contact })
+      })
+      if (res.ok) {
+        const body = await res.json()
+        return { ok: true, found: body.found === true, status: body.status || null }
+      }
+      return { ok: false, error: await readError(res, GENERIC_ERROR) }
+    } catch {
+      return { ok: false, error: CONNECT_ERROR }
+    }
+  }
+
   function resetSession() {
     endSession()
     setError(null)
@@ -470,6 +489,6 @@ export function useChat() {
   return {
     messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt, schedule,
     error, sessionId, autoOpen, starting, serverDown,
-    startChat, sendMessage, notifyTyping, resetSession
+    startChat, sendMessage, notifyTyping, resetSession, trackOrder
   }
 }
