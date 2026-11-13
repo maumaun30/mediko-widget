@@ -34,3 +34,21 @@ export function trackDate(iso) {
     ? d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' })
     : ''
 }
+
+/** /apps/mediko/orders (app proxy) → { loggedIn, orders[] } with safe fields only. */
+export function ordersFromProxy(json) {
+  if (!json || json.loggedIn !== true || !Array.isArray(json.orders)) return { loggedIn: false, orders: [] }
+  const str = (v) => (typeof v === 'string' && v ? v : null)
+  const orders = json.orders
+    .filter(o => o && typeof o.order === 'string' && o.order)
+    .map(o => ({
+      order: o.order,
+      state: str(o.state) || 'processing',
+      placedAt: str(o.placedAt),
+      shippedAt: str(o.shippedAt),
+      carrier: str(o.carrier),
+      trackingNumber: str(o.trackingNumber),
+      trackingUrl: typeof o.trackingUrl === 'string' && /^https:\/\//i.test(o.trackingUrl) ? o.trackingUrl : null
+    }))
+  return { loggedIn: true, orders }
+}

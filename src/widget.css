@@ -873,3 +873,21 @@
 .track-link { text-align: center; text-decoration: none; display: block; }
 .track-secondary { background: none; border: 1px solid var(--mdk-border); border-radius: 10px; padding: 8px; font: 500 13px 'Poppins', sans-serif; color: var(--mdk-text); cursor: pointer; }
 .track-secondary:hover { background: var(--mdk-surface); }
+
+/* Track my order: list + form layout (form is outside .prechat, so it needs its own gaps) */
+.track-form { display: flex; flex-direction: column; gap: 12px; }
+.track-form .prechat-cta { width: 100%; }
+.track-subtitle { font-size: 12.5px; font-weight: 600; color: var(--mdk-muted); text-transform: uppercase; letter-spacing: .04em; }
+.track-list { display: flex; flex-direction: column; gap: 8px; }
+.track-list .skeleton-bubble { width: 100%; height: 52px; }
+.track-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left;
+  background: #fff; border: 1px solid var(--mdk-border); border-radius: 12px;
+  padding: 10px 12px; cursor: pointer; font-family: 'Poppins', sans-serif; color: var(--mdk-text);
+}
+.track-item:hover { background: var(--mdk-surface); border-color: var(--mdk-primary); }
+.track-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.track-item-date { font-size: 12px; color: var(--mdk-muted); }
+.track-item .track-state { flex: none; }
+.track-wrap > .track-line { color: var(--mdk-muted); }
