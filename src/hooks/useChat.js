@@ -131,7 +131,9 @@ export function useChat() {
             removeResumeParam()
           }
         }
-        // 410 (expired/invalid): ignore and fall back to the stored session.
+        // 410 (expired/invalid): drop the param so reloads and shared URLs stop
+        // re-checking it, and fall back to the stored session.
+        else if (res.status === 410) removeResumeParam()
       } catch {}
     }
 
