@@ -18,6 +18,7 @@ export function validateTrack({ order, contact } = {}) {
 
 const LABELS = {
   shipped: 'Shipped',
+  delivered: 'Delivered',
   partially_shipped: 'Partially shipped',
   cancelled: 'Cancelled',
   processing: 'Being prepared'
@@ -46,6 +47,7 @@ export function ordersFromProxy(json) {
       state: str(o.state) || 'processing',
       placedAt: str(o.placedAt),
       shippedAt: str(o.shippedAt),
+      deliveredAt: str(o.deliveredAt),
       carrier: str(o.carrier),
       trackingNumber: str(o.trackingNumber),
       trackingUrl: typeof o.trackingUrl === 'string' && /^https:\/\//i.test(o.trackingUrl) ? o.trackingUrl : null

@@ -35,6 +35,7 @@ function OrderStatus({ s, onChat, onBack, backLabel }) {
       </div>
       {s.placedAt && <div className="track-line">Placed {trackDate(s.placedAt)}</div>}
       {s.shippedAt && <div className="track-line">Shipped {trackDate(s.shippedAt)}{s.carrier ? ` via ${s.carrier}` : ''}</div>}
+      {s.deliveredAt && <div className="track-line">Delivered {trackDate(s.deliveredAt)}</div>}
       {s.trackingNumber && <div className="track-line">Tracking number: <b>{s.trackingNumber}</b></div>}
       {s.trackingUrl && (
         <a className="prechat-cta track-link" href={s.trackingUrl} target="_blank" rel="noopener noreferrer">Track shipment</a>
