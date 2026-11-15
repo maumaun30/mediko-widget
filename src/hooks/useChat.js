@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { GREETING, textsFromConfig } from '../texts.js'
 import { readResumeToken } from '../prechat.js'
 import { fromServer, appendMissing, reconcileSent, shouldClearSession, SESSION_GONE } from '../messages.js'
 
 const API_URL          = import.meta.env.VITE_API_URL
-const GREETING         = 'Kumusta po! Paano ko kayo matutulungan ngayon? 😊'
 const STORAGE_KEY      = 'mediko_session_id'
 const RESUME_PARAM     = 'mdk_chat'
 const TYPING_THROTTLE  = 3000
@@ -45,6 +45,8 @@ export function useChat() {
   const [autoOpen,     setAutoOpen]     = useState(false)
   const [starting,     setStarting]     = useState(false)
   const [serverDown,   setServerDown]   = useState(false)   // config check failed; retrying
+  const [bubbleText,   setBubbleText]   = useState(GREETING) // popup next to the chat button (Gateway › Templates › Chat)
+  const greetingRef = useRef(GREETING)                      // first message of a new chat
 
   const sessionRef       = useRef(null)
   const aiRef            = useRef(false)
@@ -96,6 +98,9 @@ export function useChat() {
         setOnline(typeof cfg.online === 'boolean' ? cfg.online : null)
         setNextOpenAt(cfg.nextOpenAt || null)
         setSchedule(cfg.schedule || null)
+        const t = textsFromConfig(cfg)
+        greetingRef.current = t.greeting
+        setBubbleText(t.bubble)
         ok = true
       }
     } catch {}
@@ -184,7 +189,7 @@ export function useChat() {
     const { outcome, rows } = await fetchHistory(sid)
     if (outcome === 'ok') {
       setMessages(rows.map(fromServer))
-      if (!rows.length) addMessage('agent', GREETING)
+      if (!rows.length) addMessage('agent', greetingRef.current)
     }
     return outcome
   }
@@ -197,7 +202,7 @@ export function useChat() {
       clearHistoryRetry()
       setError(e => (e === CONNECT_ERROR ? null : e))
       if (rows.length) mergeServerMessages(rows)
-      else setMessages(prev => prev.length ? prev : [{ id: localId(), role: 'agent', content: GREETING, ts: new Date().toISOString() }])
+      else setMessages(prev => prev.length ? prev : [{ id: localId(), role: 'agent', content: greetingRef.current, ts: new Date().toISOString() }])
     } else if (outcome === 'gone') {
       endSession()
     }
@@ -246,7 +251,7 @@ export function useChat() {
       const { sessionId: id } = await res.json()
       try { localStorage.setItem(STORAGE_KEY, id) } catch {}
       setMessages([])
-      addMessage('agent', GREETING)
+      addMessage('agent', greetingRef.current)
       attachSession(id)
       return { ok: true }
     } catch {
@@ -489,7 +494,7 @@ export function useChat() {
   }
 
   return {
-    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt, schedule,
+    messages, isTyping, agentTyping, needsPrechat, ready, online, nextOpenAt, schedule, bubbleText,
     error, sessionId, autoOpen, starting, serverDown,
     startChat, sendMessage, notifyTyping, resetSession, trackOrder
   }
